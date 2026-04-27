@@ -65,6 +65,16 @@ gates:
   unit_test:  "<project's unit test command>"
   integration_test: "<project's integration test command>"
   format:     "<formatter command, e.g. pnpm prettier --write>"
+  compile:
+    frontend: "<e.g. pnpm build>"
+    backend:  "<e.g. dotnet build>"
+  startup:
+    frontend: "<e.g. pnpm dev>"
+    backend:  "<e.g. dotnet run>"
+  healthcheck:
+    frontend: "<e.g. curl -sf http://localhost:3000 > /dev/null>"
+    backend:  "<e.g. curl -sf http://localhost:5000/health > /dev/null>"
+  startup_wait_seconds: 15
 
 # Paths that github copilot must never auto-edit. Implementations that require these
 # will be flagged for human pairing. Keep this list small and deliberate.

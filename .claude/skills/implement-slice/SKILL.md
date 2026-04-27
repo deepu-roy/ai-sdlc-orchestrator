@@ -50,7 +50,69 @@ Write code. Keep changes within declared file scope. Follow `guidelines/*` for s
 
 If any fail, fix. Cap at 3 self-repair loops. If still failing, return with `blockers: ["tests failing: <summary>"]`.
 
-### Step 6 — Commit
+### Step 6 — Compile check
+
+Read `gates.compile.<layer>` from `.claude/project/PROFILE.md`
+where `<layer>` matches this slice's declared layer.
+Skip if value is `n/a`.
+
+```bash
+COMPILE_CMD=$(yq -r '.gates.compile.<layer>' .claude/project/PROFILE.md)
+[[ "$COMPILE_CMD" == "n/a" ]] && echo "Compile check skipped" && exit 0
+
+eval "$COMPILE_CMD" 2>&1 | tee /tmp/compile-output.txt
+COMPILE_EXIT=${PIPESTATUS[0]}
+
+if [[ $COMPILE_EXIT -ne 0 ]]; then
+  # One self-repair loop for deterministic errors (missing import, wrong type)
+  # Read the error, attempt fix, re-run once
+  # If still failing → return blocker, do not commit
+  echo "Compile failed — see /tmp/compile-output.txt"
+  exit 1
+fi
+```
+
+Cap self-repair at **1 loop** for compile errors only.
+Do not self-repair if the same error persists after one fix attempt — return a blocker instead.
+
+### Step 7 — Startup check
+
+Read `gates.startup.<layer>` and `gates.healthcheck.<layer>` from PROFILE.md.
+Skip entirely if either is `n/a`.
+
+```bash
+STARTUP_CMD=$(yq -r '.gates.startup.<layer>' .claude/project/PROFILE.md)
+HEALTH_CMD=$(yq -r '.gates.healthcheck.<layer>' .claude/project/PROFILE.md)
+WAIT=$(yq -r '.gates.startup_wait_seconds // 15' .claude/project/PROFILE.md)
+
+[[ "$STARTUP_CMD" == "n/a" ]] && echo "Startup check skipped" && exit 0
+
+# Start app in background
+eval "$STARTUP_CMD" &
+APP_PID=$!
+sleep "$WAIT"
+
+# Healthcheck
+eval "$HEALTH_CMD"
+HEALTH_EXIT=$?
+
+# Always kill the background process
+kill $APP_PID 2>/dev/null
+wait $APP_PID 2>/dev/null
+
+if [[ $HEALTH_EXIT -ne 0 ]]; then
+  echo "Startup check failed — app did not respond at healthcheck URL"
+  # Do NOT self-repair startup failures — surface to human
+  exit 1
+fi
+
+echo "Startup check passed"
+```
+
+**No self-repair for startup failures.** Add to blockers:
+`"startup check failed — app unresponsive after $WAIT seconds"`.
+
+### Step 8 — Commit
 
 ```bash
 git add <files>
@@ -59,7 +121,7 @@ git commit -m "WI-<parent> S<id>: <slice title>"
 
 Do not push — the orchestrator controls pushes for parallel safety.
 
-### Step 7 — Return JSON summary
+### Step 9 — Return JSON summary
 
 Emit exactly this block (no prose after):
 
@@ -69,7 +131,12 @@ Emit exactly this block (no prose after):
   "slice": "$1",
   "branch": "<current branch>",
   "commit_sha": "<sha>",
-  "tests": { "unit": "passed|failed", "integration": "passed|failed|n/a" },
+  "tests": {
+    "unit": "passed|failed",
+    "integration": "passed|failed|n/a",
+    "compile": "passed|failed|skipped",
+    "startup": "passed|failed|skipped"
+  },
   "files_touched": ["<paths>"],
   "blockers": [],
   "questions": []

@@ -91,9 +91,22 @@ git merge --no-ff story/WI-$1/frontend
 
 If both merges are clean:
 
-- Run full test suite as declared in `PROFILE.md` `gates.pre_merge`.
-- If tests pass → proceed to Phase 6.
-- If tests fail → spawn a single `integration-fix` run of the slowest-failing subagent (usually backend-dev) with the failing tests as context. Cap at 2 self-repair loops.
+1. Run full test suite: `gates.pre_merge` command from PROFILE.md.
+2. Run compile check for each layer that was implemented:
+   - `gates.compile.frontend` if frontend slices were present
+   - `gates.compile.backend` if backend slices were present
+3. Run startup check for the full integrated app:
+   - Start backend first, wait `startup_wait_seconds`
+   - Start frontend, wait `startup_wait_seconds`
+   - Hit both healthchecks
+   - Kill both processes
+
+If all pass → proceed to Phase 6.
+
+If compile fails → attempt 1 self-repair loop, then surface as blocker.
+If startup fails → do not self-repair. Open a draft PR with the
+startup error output attached. Post to Slack:
+`"WI-$1 startup check failed — human pairing needed"`
 
 #### 5b. Conflict path
 
