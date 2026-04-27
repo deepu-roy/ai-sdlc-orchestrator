@@ -21,7 +21,7 @@ You orchestrate the implementation of story **$1**. You do not write feature cod
 
 ### Phase 1 — Load context
 
-1. Read `.claude/project/PROFILE.md`, `CLAUDE.md`, `overrides/implement-slice.md` (applies to orchestrator too), `guidelines/*`, relevant `stacks/*`.
+1. Read `.github/project/PROFILE.md`, `.github/project/copilot-instructions.md`, `.github/project/overrides/implement-slice.md` (applies to orchestrator too), `.github/project/guidelines/*`, relevant `.github/project/stacks/*`.
 2. Read `docs/designs/WI-$1/slices.md`.
 3. Validate the slice YAML parses cleanly. If not, abort: write the parse error to the parent work item.
 

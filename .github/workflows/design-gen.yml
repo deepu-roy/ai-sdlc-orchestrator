@@ -60,7 +60,7 @@ jobs:
             project="${{ vars.ADO_PROJECT }}"
 
       - name: Make scripts executable
-        run: chmod +x .claude/hooks/*.sh .claude/scripts/*.sh .github/hooks/*.sh
+        run: chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
 
       - name: Configure git identity
         run: |
@@ -77,13 +77,13 @@ jobs:
             --accept-all \
             2>&1 | tee copilot-output.log
         env:
-          CLAUDE_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
 
       - name: Archive trace
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: claude-trace-${{ steps.wi.outputs.id }}
-          path: .claude/trace/
+          name: github-trace-${{ steps.wi.outputs.id }}
+          path: .github/trace/
           retention-days: 90
           if-no-files-found: ignore

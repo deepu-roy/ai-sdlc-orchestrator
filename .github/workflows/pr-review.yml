@@ -8,7 +8,7 @@ on:
   pull_request:
     branches: [main]
     paths-ignore:
-      - '.claude/trace/**'
+      - '.github/trace/**'
       - 'docs/designs/**'
 
 env:
@@ -47,7 +47,7 @@ jobs:
           az extension add --name azure-devops --yes --only-show-errors
           echo "$ADO_PAT" | az devops login --organization "${{ vars.ADO_ORG_URL }}" || true
           az devops configure --defaults organization="${{ vars.ADO_ORG_URL }}" project="${{ vars.ADO_PROJECT }}" || true
-          chmod +x .claude/hooks/*.sh .claude/scripts/*.sh .github/hooks/*.sh
+          chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
           npm install -g @github/copilot-cli
 
       - name: Run ${{ matrix.label }}
@@ -57,7 +57,7 @@ jobs:
             --prompt "Review PR #${{ github.event.pull_request.number }} on branch ${{ github.head_ref }}. Run git diff origin/main...HEAD and post your findings as PR comments. Return your JSON summary at the end." \
             --accept-all
         env:
-          CLAUDE_RUN_ID: "${{ github.run_id }}-${{ matrix.agent }}"
+          GITHUB_RUN_ID: "${{ github.run_id }}-${{ matrix.agent }}"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Archive trace
@@ -65,6 +65,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: trace-${{ matrix.agent }}-${{ github.event.pull_request.number }}
-          path: .claude/trace/
+          path: .github/trace/
           retention-days: 90
           if-no-files-found: ignore

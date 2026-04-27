@@ -21,9 +21,9 @@ Implement slice **$1**. You may be running standalone or as a subagent step.
 
 ### Step 1 — Load context
 
-- `.claude/project/PROFILE.md`
-- `.claude/project/overrides/implement-slice.md`
-- `.claude/project/guidelines/*`
+- `.github/project/PROFILE.md`
+- `.github/project/overrides/implement-slice.md`
+- `.github/project/guidelines/*`
 - Relevant `stacks/*` per slice layer
 - `docs/designs/WI-<parent>/slices.md` — find your slice by ID
 

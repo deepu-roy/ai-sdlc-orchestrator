@@ -2,7 +2,7 @@
 name: security-review
 description: Review a PR diff for security issues — OWASP Top 10, LLM-specific risks, injection, secrets, auth, and data exposure. Posts PR comments; never approves.
 argument-hint: "<pr-id>"
-allowed-tools: Read, Grep, Glob, Bash(git:*), Bash(az:*), Bash(jq:*), Bash(.claude/scripts/*)
+allowed-tools: Read, Grep, Glob, Bash(git:*), Bash(az:*), Bash(jq:*), Bash(.github/scripts/*)
 ---
 
 # Security review
@@ -54,7 +54,7 @@ Review PR **$1** for security issues. Be specific, cite the line, assign severit
 - Uncontrolled retry loops over LLM calls (cost risk) → minor.
 
 ### Project-specific
-Read `.claude/project/overrides/security-review.md` for project-specific rules (e.g. PII catalog, audit requirements). Apply them.
+Read `.github/project/overrides/security-review.md` for project-specific rules (e.g. PII catalog, audit requirements). Apply them.
 
 ## Procedure
 

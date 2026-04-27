@@ -2,7 +2,7 @@
 name: requirements-analysis
 description: Convert an ADO work item tagged ai:ready into functional.md + technical.md + slices.md, create child ADO Tasks, open a design PR, and notify Slack. Use when invoked by the design-gen pipeline with a work item ID.
 argument-hint: "<work-item-id>"
-allowed-tools: Read, Write, Glob, Grep, Bash(git:*), Bash(gh:*), Bash(az:*), Bash(curl:*), Bash(jq:*), Bash(yq:*), Bash(.claude/scripts/*)
+allowed-tools: Read, Write, Glob, Grep, Bash(git:*), Bash(gh:*), Bash(az:*), Bash(curl:*), Bash(jq:*), Bash(yq:*), Bash(.github/scripts/*)
 ---
 
 # Requirements analysis → design + slicing
@@ -15,18 +15,18 @@ You are converting ADO work item **$1** into three design artifacts + child work
 2. **Tech-agnostic `functional.md`.** Blocklist: OAuth, JWT, REST, GraphQL, gRPC, PostgreSQL, MySQL, Redis, MongoDB, React, Angular, Vue, Next, Kubernetes, Docker, AWS, Azure (as cloud service), Lambda, S3, Cosmos, RabbitMQ, Kafka. These are allowed in `technical.md`.
 3. **Measurable success criteria.** Reject adjectives (fast, secure, scalable). Require numbers or user-observable behaviour.
 4. **One slice = one PR-sized unit.** Disjoint file scopes between parallel slices. Measurable AC, declared impact, declared risk, test plan.
-5. **No auto-merge. No pushes to main. No edits to `.claude/skills/`, `.azure-pipelines/`, or secret files.** Hooks enforce.
+5. **No auto-merge. No pushes to main. No edits to `.github/skills/`, `.azure-pipelines/`, or secret files.** Hooks enforce.
 
 ## Procedure
 
 ### Step 1 — Load project layer
 
 Read (in order):
-1. `.claude/project/PROFILE.md` — if missing, abort with: `PROFILE.md not found. Run /bootstrap-project first.`
-2. `.claude/project/CLAUDE.md` (if present)
-3. `.claude/project/overrides/requirements-analysis.md` (if present)
-4. `.claude/project/guidelines/*.md` — all files
-5. `.claude/project/stacks/*.md` — only those matching the PROFILE
+1. `.github/project/PROFILE.md` — if missing, abort with: `PROFILE.md not found. Run /bootstrap-project first.`
+2. `.github/project/copilot-instructions.md` (if present)
+3. `.github/project/overrides/requirements-analysis.md` (if present)
+4. `.github/project/guidelines/*.md` — all files
+5. `.github/project/stacks/*.md` — only those matching the PROFILE
 
 On any conflict, higher-precedence source wins: overrides > project CLAUDE.md > guidelines > master.
 

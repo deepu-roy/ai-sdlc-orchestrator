@@ -2,7 +2,7 @@
 name: technical-slicing
 description: Break a technical design into implementable slices. Usually chained from requirements-analysis; can be called standalone to re-slice an existing design.
 argument-hint: "<work-item-id>"
-allowed-tools: Read, Write, Glob, Grep, Bash(jq:*), Bash(yq:*), Bash(.claude/scripts/*)
+allowed-tools: Read, Write, Glob, Grep, Bash(jq:*), Bash(yq:*), Bash(.github/scripts/*)
 ---
 
 # Technical slicing
@@ -21,9 +21,9 @@ You produce `slices.md` for work item **$1** from an existing `docs/designs/WI-$
 
 ### Step 1 — Load inputs
 
-- `.claude/project/PROFILE.md` (required — abort if missing)
-- `.claude/project/overrides/technical-slicing.md` (if present)
-- `.claude/project/guidelines/*.md`
+- `.github/project/PROFILE.md` (required — abort if missing)
+- `.github/project/overrides/technical-slicing.md` (if present)
+- `.github/project/guidelines/*.md`
 - `docs/designs/WI-$1/functional.md`
 - `docs/designs/WI-$1/technical.md`
 

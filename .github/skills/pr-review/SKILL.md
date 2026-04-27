@@ -20,10 +20,10 @@ Review the diff in PR **$1**. Post comments. Do not approve.
 
 ### Step 1 — Load context
 
-- `.claude/project/PROFILE.md`
-- `.claude/project/overrides/pr-review.md` (if present)
-- `.claude/project/guidelines/*.md`
-- Relevant `stacks/*`
+- `.github/project/PROFILE.md`
+- `.github/project/overrides/pr-review.md` (if present)
+- `.github/project/guidelines/*.md`
+- Relevant `.github/project/stacks/*`
 
 ### Step 2 — Read the diff
 

@@ -154,7 +154,33 @@ quarantined_paths: []        # add paths here that Claude must never auto-edit
 # [ ] Rename this file to PROFILE.md to activate
 ```
 
-### Phase 6 — Handoff
+### Phase 6 — Generate project CLAUDE.md
+
+After PROFILE.draft.md is written, analyse the codebase to populate
+`.claude/project/CLAUDE.md` with real content (not stubs):
+
+1. Read the 10 most recently modified source files.
+2. Read any existing root-level CLAUDE.md or README.
+3. Read package.json scripts, Makefile, or equivalent — these reveal
+   how the team actually builds, tests, and runs things.
+4. Look for existing ADRs, CONTRIBUTING.md, or docs/ markdown.
+5. Generate `.claude/project/CLAUDE.md` covering:
+   - How to build and run the project (exact commands, not guesses)
+   - How to run tests (unit, integration, e2e if present)
+   - Key architectural patterns you observed (folder structure, DI style,
+     error handling patterns, state management approach)
+   - Non-obvious gotchas (monorepo workspace hoisting, generated files,
+     env var requirements)
+   - What NOT to do (antipatterns you spotted)
+6. Mark anything uncertain as [VERIFY] not [NEEDS HUMAN INPUT] —
+   the distinction matters: VERIFY means "Claude observed this, human
+   should confirm", NEEDS HUMAN INPUT means "Claude has no signal".
+
+This file is immediately useful even before the human edits it.
+The PROFILE.md is not activated until renamed, but CLAUDE.md can be
+committed as a first draft immediately.
+
+### Phase 7 — Handoff
 
 End with:
 

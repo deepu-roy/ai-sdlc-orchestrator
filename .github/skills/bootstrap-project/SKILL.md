@@ -13,9 +13,9 @@ You are onboarding this repo to the AI-SDLC system. You run **once**, invoked ma
 ## Hard rules
 
 1. **Detect, don't assume.** Every claim in the draft must cite a file and line. If you cannot cite, write `[NEEDS HUMAN INPUT]`.
-2. **Draft only.** Write `.claude/project/PROFILE.draft.md`. Never write `PROFILE.md` directly. Never commit or push.
+2. **Draft only.** Write `.github/project/PROFILE.draft.md`. Never write `PROFILE.md` directly. Never commit or push.
 3. **No silent skill enabling.** List recommended skills; the human decides.
-4. **Do not edit master skills** (`.claude/skills/**`). Hooks will block this.
+4. **Do not edit master skills** (`.github/skills/**`). Hooks will block this.
 5. **Do not write to `.azure-pipelines/**`, secrets, or other protected paths.**
 
 ## Procedure
@@ -95,14 +95,14 @@ Stack rules:
 
 Create (only if absent):
 
-- `.claude/project/PROFILE.draft.md` — the draft profile.
-- `.claude/project/CLAUDE.md` — placeholder with a header comment explaining precedence.
-- `.claude/project/overrides/.gitkeep` — empty.
-- `.claude/project/guidelines/coding-standards.md` — starter template (see below).
-- `.claude/project/guidelines/error-handling.md` — starter template.
-- `.claude/project/guidelines/naming.md` — starter template.
-- `.claude/project/guidelines/api-contracts.md` — starter template.
-- `.claude/project/stacks/<detected-stack>.md` — starter per detected stack.
+- `.github/project/PROFILE.draft.md` — the draft profile.
+- `.github/project/copilot-instructions.md` — placeholder with a header comment explaining precedence.
+- `.github/project/overrides/.gitkeep` — empty.
+- `.github/project/guidelines/coding-standards.md` — starter template (see below).
+- `.github/project/guidelines/error-handling.md` — starter template.
+- `.github/project/guidelines/naming.md` — starter template.
+- `.github/project/guidelines/api-contracts.md` — starter template.
+- `.github/project/stacks/<detected-stack>.md` — starter per detected stack.
 
 Starter templates should contain section headers and `[NEEDS HUMAN INPUT]` markers — not guessed content.
 
@@ -161,7 +161,7 @@ End with:
 
 ```
 === BOOTSTRAP SUMMARY ===
-Draft written to: .claude/project/PROFILE.draft.md
+Draft written to: .github/project/PROFILE.draft.md
 Scaffolds created: <list>
 Scaffolds skipped (already existed): <list>
 Detected stacks: <short list>
@@ -171,7 +171,7 @@ Next steps for the human:
 1. Review PROFILE.draft.md. Correct [NEEDS HUMAN INPUT] entries.
 2. Fill in guidelines/*.md with real team conventions.
 3. Rename PROFILE.draft.md to PROFILE.md.
-4. Commit .claude/project/ to git.
+4. Commit .github/project/ to git.
 ```
 
 Do not post to Slack or update ADO — this is a local, human-driven step.

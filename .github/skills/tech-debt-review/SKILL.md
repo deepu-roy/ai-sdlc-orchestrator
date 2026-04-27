@@ -2,7 +2,7 @@
 name: tech-debt-review
 description: Review a PR diff for technical debt — pattern deviation, duplication, test quality, coupling, documentation gaps. Posts PR comments; never approves.
 argument-hint: "<pr-id>"
-allowed-tools: Read, Grep, Glob, Bash(git:*), Bash(az:*), Bash(jq:*), Bash(.claude/scripts/*)
+allowed-tools: Read, Grep, Glob, Bash(git:*), Bash(az:*), Bash(jq:*), Bash(.github/scripts/*)
 ---
 
 # Tech debt review
@@ -45,7 +45,7 @@ Review PR **$1** for debt. Focus on what will bite future maintainers.
 - TODO without owner and ticket → minor.
 
 ### Project-specific
-Read `.claude/project/guidelines/coding-standards.md` and `.claude/project/overrides/tech-debt-review.md`. Apply.
+Read `.github/project/guidelines/coding-standards.md` and `.github/project/overrides/tech-debt-review.md`. Apply.
 
 ## Procedure
 
