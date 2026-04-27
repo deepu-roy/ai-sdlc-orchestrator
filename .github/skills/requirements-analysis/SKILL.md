@@ -28,12 +28,12 @@ Read (in order):
 4. `.github/project/guidelines/*.md` — all files
 5. `.github/project/stacks/*.md` — only those matching the PROFILE
 
-On any conflict, higher-precedence source wins: overrides > project CLAUDE.md > guidelines > master.
+On any conflict, higher-precedence source wins: overrides > project copilot-instructions.md > guidelines > master.
 
 ### Step 2 — Fetch the work item
 
 ```bash
-.claude/scripts/ado-wi-show.sh $1 > /tmp/wi-$1.json
+.github/scripts/ado-wi-show.sh $1 > /tmp/wi-$1.json
 ```
 
 Extract: title, description, acceptance criteria, tags, linked parents, linked children (if any).
@@ -67,14 +67,19 @@ Structure:
 ## 5. Success criteria (measurable)
 - <Criterion>        [source: <work item field or [NEEDS HUMAN INPUT]>]
 
-## 6. Open questions
+# 6. Open questions
 - <Question> → <who to ask>
+
+Post the question on the work item as a comment, and link it here.
+
+```bash
+.github/scripts/ado-wi-update.sh $1 --discussion "Open question: <Question> → <who to ask>"
 ```
 
 After writing, run:
 
 ```bash
-.claude/scripts/check-tech-agnostic.sh docs/designs/WI-$1/functional.md
+.github/scripts/check-tech-agnostic.sh docs/designs/WI-$1/functional.md
 ```
 
 If it exits non-zero, revise the document.
@@ -157,7 +162,7 @@ For each slice:
 
 ```bash
 # extract single slice YAML to a temp file, then:
-.claude/scripts/ado-wi-create-slice.sh $1 /tmp/slice-<id>.yaml
+.github/scripts/ado-wi-create-slice.sh $1 /tmp/slice-<id>.yaml
 ```
 
 Attach the full slice YAML as the work item description.
@@ -199,7 +204,7 @@ EOF
 ### Step 6 — Slack notification
 
 ```bash
-.claude/scripts/slack-notify.sh "Design ready for review: WI-$1 — <PR URL>"
+.github/scripts/slack-notify.sh "Design ready for review: WI-$1 — <PR URL>"
 ```
 
 ### Step 7 — Handoff ritual

@@ -67,8 +67,13 @@ Structure:
 ## 5. Success criteria (measurable)
 - <Criterion>        [source: <work item field or [NEEDS HUMAN INPUT]>]
 
-## 6. Open questions
+# 6. Open questions
 - <Question> → <who to ask>
+
+Post the question on the work item as a comment, and link it here.
+
+```bash
+.claude/scripts/ado-wi-update.sh $1 --discussion "Open question: <Question> → <who to ask>"
 ```
 
 After writing, run:
