@@ -25,6 +25,7 @@ document was generated:
 .github/scripts/ado-wi-show.sh $1 | jq '.comments // .fields["System.History"]'
 ```
 Also read any inline edits the human made directly to functional.md.
+Capture the source of each answer (comment ID, date, user or "edited functional.md") for citation in the next step.
 
 ### Step 3 — Update functional.md
 For each ANSWERED question:
