@@ -61,7 +61,7 @@ Read `.claude/project/overrides/security-review.md` for project-specific rules (
 1. Load project layer (as in pr-review skill).
 2. `git diff origin/main...HEAD`.
 3. Walk the checklist. For each finding, post an inline comment with severity and exact line.
-4. Post one summary:
+4. Write to `docs/designs/WI-$1/security-review.md` 
 
 ```
 Security review complete.
@@ -71,4 +71,43 @@ Minor: N
 Checklist coverage: <list of categories checked>
 ```
 
-5. Emit standard handoff block.
+## Commit the report
+
+```bash
+git add docs/designs/WI-$1/security-review.md
+git commit -m "WI-$1: security review report"
+```
+
+Do not push — caller controls pushes.
+
+### Step 9 — Post to PR (if PR exists)
+
+Read the PR platform from the override file (defaults to `azure-devops`):
+
+```bash
+PR_PLATFORM=$(yq -r '.pr_platform // "azure-devops"' .claude/project/overrides/security-review.md 2>/dev/null || echo "azure-devops")
+BRANCH=$(git branch --show-current)
+REPORT_BODY=$(cat "docs/designs/WI-$1/security-review.md")
+```
+
+**If `pr_platform: github`** — use `gh` CLI:
+
+```bash
+PR_ID=$(gh pr list --head "$BRANCH" --json number -q ".[0].number" 2>/dev/null | tr -d '\n')
+if [[ -n "$PR_ID" && "$PR_ID" != "null" ]]; then
+  gh pr comment "$PR_ID" --body "$REPORT_BODY" 2>/dev/null && echo "✓ Comment posted" || echo "Could not post comment"
+fi
+```
+
+**If `pr_platform: azure-devops`** — use `az` CLI:
+
+```bash
+PR_ID=$(az repos pr list --source-branch "$BRANCH" \
+  --query '[0].pullRequestId' -o tsv 2>/dev/null)
+if [[ -n "$PR_ID" ]]; then
+  .claude/scripts/ado-pr-comment.sh "$PR_ID" active "$REPORT_BODY"
+fi
+```
+
+If no PR is found for the current branch, skip silently.
+

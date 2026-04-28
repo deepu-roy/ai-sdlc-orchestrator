@@ -34,19 +34,60 @@ Extract:
 - Test credentials: from `overrides/verify-story.md`
 - All ACs grouped by slice from `slices.md`
 
-### Step 2 — Confirm app is running
+### Step 2 — Confirm app is running (auto-start if needed)
+
+Read startup config from PROFILE.md:
 
 ```bash
-HEALTH_CMD=$(yq -r '.gates.healthcheck.frontend // "n/a"' .github/project/PROFILE.md)
-if [[ "$HEALTH_CMD" == "n/a" ]]; then
-  echo "BLOCKED: no healthcheck configured in PROFILE.md"
+HEALTH_FRONTEND=$(yq -r '.gates.healthcheck.frontend // "n/a"' .github/project/PROFILE.md)
+HEALTH_BACKEND=$(yq -r '.gates.healthcheck.backend // "n/a"' .github/project/PROFILE.md)
+START_FRONTEND=$(yq -r '.gates.startup.frontend // "n/a"' .github/project/PROFILE.md)
+START_BACKEND=$(yq -r '.gates.startup.backend // "n/a"' .github/project/PROFILE.md)
+WAIT_SECS=$(yq -r '.gates.startup_wait_seconds // 15' .github/project/PROFILE.md)
+```
+
+Check backend first, then frontend. For each, if the healthcheck fails, auto-start it:
+
+```bash
+# ── Backend ──────────────────────────────────────────────────────────────────
+if [[ "$HEALTH_BACKEND" != "n/a" ]]; then
+  if ! eval "$HEALTH_BACKEND" 2>/dev/null; then
+    echo "Backend not running — starting with: $START_BACKEND"
+    eval "$START_BACKEND" &
+    BACKEND_PID=$!
+    echo "Waiting ${WAIT_SECS}s for backend to come up..."
+    sleep "$WAIT_SECS"
+    if ! eval "$HEALTH_BACKEND" 2>/dev/null; then
+      echo "BLOCKED: backend failed to start. Check logs."
+      kill "$BACKEND_PID" 2>/dev/null || true
+      exit 1
+    fi
+    echo "Backend is up."
+  else
+    echo "Backend already running."
+  fi
+fi
+
+# ── Frontend ─────────────────────────────────────────────────────────────────
+if [[ "$HEALTH_FRONTEND" == "n/a" ]]; then
+  echo "BLOCKED: no healthcheck configured for frontend in PROFILE.md"
   exit 1
 fi
 
-if ! eval "$HEALTH_CMD"; then
-  echo "BLOCKED: app not responding at healthcheck. Start it with:"
-  yq -r '.gates.startup.frontend' .github/project/PROFILE.md
-  exit 1
+if ! eval "$HEALTH_FRONTEND" 2>/dev/null; then
+  echo "Frontend not running — starting with: $START_FRONTEND"
+  eval "$START_FRONTEND" &
+  FRONTEND_PID=$!
+  echo "Waiting ${WAIT_SECS}s for frontend to come up..."
+  sleep "$WAIT_SECS"
+  if ! eval "$HEALTH_FRONTEND" 2>/dev/null; then
+    echo "BLOCKED: frontend failed to start. Check logs."
+    kill "$FRONTEND_PID" 2>/dev/null || true
+    exit 1
+  fi
+  echo "Frontend is up."
+else
+  echo "Frontend already running."
 fi
 ```
 
@@ -137,17 +178,34 @@ Do not push — caller controls pushes.
 
 ### Step 9 — Post to PR (if PR exists)
 
-If the current branch has an open PR, post the verification.md as a PR comment:
+Read the PR platform from the override file (defaults to `azure-devops`):
 
 ```bash
-PR_ID=$(az repos pr list --source-branch "$(git branch --show-current)" \
-  --query '[0].pullRequestId' -o tsv 2>/dev/null)
+PR_PLATFORM=$(yq -r '.pr_platform // "azure-devops"' .claude/project/overrides/verify-story.md 2>/dev/null || echo "azure-devops")
+BRANCH=$(git branch --show-current)
+REPORT_BODY=$(cat "docs/designs/WI-$1/verification.md")
+```
 
-if [[ -n "$PR_ID" ]]; then
-  .github/scripts/ado-pr-comment.sh "$PR_ID" active \
-    @docs/designs/WI-$1/verification.md
+**If `pr_platform: github`** — use `gh` CLI:
+
+```bash
+PR_ID=$(gh pr list --head "$BRANCH" --json number -q ".[0].number" 2>/dev/null | tr -d '\n')
+if [[ -n "$PR_ID" && "$PR_ID" != "null" ]]; then
+  gh pr comment "$PR_ID" --body "$REPORT_BODY" 2>/dev/null && echo "✓ Comment posted" || echo "Could not post comment"
 fi
 ```
+
+**If `pr_platform: azure-devops`** — use `az` CLI:
+
+```bash
+PR_ID=$(az repos pr list --source-branch "$BRANCH" \
+  --query '[0].pullRequestId' -o tsv 2>/dev/null)
+if [[ -n "$PR_ID" ]]; then
+  .claude/scripts/ado-pr-comment.sh "$PR_ID" active "$REPORT_BODY"
+fi
+```
+
+If no PR is found for the current branch, skip silently.
 
 ### Step 10 — Return JSON summary
 
