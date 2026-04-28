@@ -89,24 +89,59 @@ git merge --no-ff story/WI-$1/frontend
 
 #### 5a. Success path
 
-If both merges are clean:
+If both merges are clean, run gates in this order. Stop at first failure.
 
-1. Run full test suite: `gates.pre_merge` command from PROFILE.md.
-2. Run compile check for each layer that was implemented:
-   - `gates.compile.frontend` if frontend slices were present
-   - `gates.compile.backend` if backend slices were present
-3. Run startup check for the full integrated app:
-   - Start backend first, wait `startup_wait_seconds`
-   - Start frontend, wait `startup_wait_seconds`
-   - Hit both healthchecks
-   - Kill both processes
+1. **Test suite:** `gates.pre_merge` from PROFILE.md
+2. **Compile checks:** `.claude/scripts/check-compile.sh both`
+3. **Startup check:** `.claude/scripts/check-startup.sh both`
+4. **Browser verification (Phase 5c)** — chained call below
 
-If all pass → proceed to Phase 6.
+If all four pass → proceed to Phase 6 (open PR).
 
-If compile fails → attempt 1 self-repair loop, then surface as blocker.
-If startup fails → do not self-repair. Open a draft PR with the
-startup error output attached. Post to Slack:
-`"WI-$1 startup check failed — human pairing needed"`
+If any fail → Phase 5b (conflict path), with the failure type recorded in the PR description.
+
+#### 5c. Browser verification
+
+Only run if startup check passed (otherwise app isn't responsive
+and verification can't work).
+
+```bash
+# Read base URL from PROFILE
+BASE_URL=$(yq -r '.gates.healthcheck.frontend' .claude/project/PROFILE.md \
+  | grep -oE 'https?://[^ ]+' | head -1)
+
+# Confirm Chrome MCP is available
+if ! claude mcp list 2>/dev/null | grep -q chrome; then
+  echo "Chrome MCP not available — skipping verification"
+  echo "verification: skipped" >> /tmp/wi-$1-summary.txt
+  return 0
+fi
+```
+
+Then invoke the verify-story skill via the Task tool:
+
+- Spawn subagent with the `verify-story` skill on slice WI-$1
+- Wait for completion
+- Parse the verification.md it produced
+- If verdict is FAIL → demote PR to draft, attach verification.md
+- If verdict is PASS → continue to Phase 6 (PR opens normally)
+
+After verification, the report is committed alongside the implementation:
+
+```bash
+git add docs/designs/WI-$1/verification.md docs/designs/WI-$1/screenshots/
+git commit -m "WI-$1: browser verification report"
+```
+
+#### 5c-skip. When to skip browser verification
+
+Skip if any of these:
+- `gates.startup.frontend` is `n/a` (no UI to verify)
+- Chrome MCP not connected
+- Slices have `layer: backend` only with no user-facing change
+- PROFILE.md sets `gates.skip_browser_verification: true`
+
+Log the reason in the trace and continue.
 
 #### 5b. Conflict path
 
@@ -121,14 +156,59 @@ If either merge produces conflicts, or a subagent returned blockers/questions:
 - Comment on parent work item.
 - Return. Do not proceed to Phase 6.
 
+#### 5c. Browser verification
+
+Only run if startup check (gate 3) passed.
+
+Determine whether to run:
+
+- Skip if `gates.startup.frontend == "n/a"` in PROFILE.md
+- Skip if all slices have `layer: backend` only
+- Skip if PROFILE.md sets `gates.skip_browser_verification: true`
+- Skip if Chrome MCP unavailable (check via `claude mcp list`)
+
+If skipping, log the reason and continue to Phase 6.
+
+If running, spawn via Task tool:
+
+- Subagent: `verify-story`
+- Prompt: `Verify ACs for WI-$1. App is running locally. Base URL from PROFILE.md. Return the standard JSON summary when done.`
+
+Wait for completion. Parse the returned JSON.
+
+Branching logic:
+
+| Verdict | Action |
+|---|---|
+| `READY_FOR_REVIEW` | Continue to Phase 6 — open PR as normal |
+| `ISSUES_FOUND` | Continue to Phase 6 — but open PR as **draft**, with verification.md attached |
+| `BLOCKED` | Continue to Phase 6 — open PR as **draft**, attach verification.md, surface BLOCKED reasons |
+| `SKIPPED` | Continue to Phase 6 — note the skip reason in PR description |
+
+In all cases, commit the verification report:
+
+```bash
+git add docs/designs/WI-$1/verification.md docs/designs/WI-$1/screenshots/ 2>/dev/null
+git commit -m "WI-$1: browser verification report" 2>/dev/null || true
+```
+
+The orchestrator never opens PRs based on issues found — that is the human's call. The verification report becomes part of the PR for the human to read.
+
 ### Phase 6 — Open feature PR
 
 ```bash
+# Decide whether to open as draft based on verification verdict
+DRAFT_FLAG=""
+if [[ "$VERIFICATION_VERDICT" == "ISSUES_FOUND" || "$VERIFICATION_VERDICT" == "BLOCKED" ]]; then
+  DRAFT_FLAG="--draft"
+fi
+
 az repos pr create \
+  $DRAFT_FLAG \
   --source-branch story/WI-$1 \
   --target-branch main \
   --title "WI-$1: <title>" \
-  --description "$(cat <<EOF
+  --description "$(cat <<DESC
 ## Implementation of WI-$1
 
 ### Subagent summaries
@@ -137,8 +217,14 @@ az repos pr create \
 <frontend-dev summary>
 
 ### Test results
-Unit: passed | failed — <summary>
-Integration: passed | failed — <summary>
+
+- Unit: passed | failed — <summary>
+- Integration: passed | failed — <summary>
+- Compile: passed | failed | skipped
+- Startup: passed | failed | skipped
+- Browser verification: READY_FOR_REVIEW | ISSUES_FOUND | BLOCKED | SKIPPED
+  - ACs passed/failed/blocked: N/N/N
+  - Full report: [`verification.md`](docs/designs/WI-$1/verification.md)
 
 ### Slices implemented
 <list of slice IDs>
@@ -149,7 +235,7 @@ Integration: passed | failed — <summary>
 - [ ] Tech-debt subagent comments triaged
 
 Refs WI-$1
-EOF
+DESC
 )" \
   --work-items $1
 ```

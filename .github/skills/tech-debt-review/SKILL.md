@@ -2,7 +2,6 @@
 name: tech-debt-review
 description: Review a PR diff for technical debt — pattern deviation, duplication, test quality, coupling, documentation gaps. Posts PR comments; never approves.
 argument-hint: "<pr-id>"
-allowed-tools: Read, Grep, Glob, Bash(git:*), Bash(az:*), Bash(jq:*), Bash(.github/scripts/*)
 ---
 
 # Tech debt review

@@ -1,8 +1,6 @@
 ---
 name: bootstrap-project
 description: One-time project onboarding. Detects stack, repo kind, test frameworks, CI, and conventions, and generates the project overrides layer as a draft for human review. Run once when adopting the AI-SDLC system in a new repo.
-argument-hint: ""
-allowed-tools: Read, Write, Glob, Grep, Bash(git:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(jq:*)
 disable-model-invocation: true
 ---
 

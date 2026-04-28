@@ -2,7 +2,6 @@
 name: update-functional
 description: Incorporate answers to open questions in functional.md, update the document, and determine whether technical design can now proceed. Use after a human has answered questions flagged in §6 of functional.md.
 argument-hint: "<work-item-id>"
-allowed-tools: Read, Write, Edit, Bash(git:*), Bash(.claude/scripts/*)
 ---
 
 # Update functional design with answers

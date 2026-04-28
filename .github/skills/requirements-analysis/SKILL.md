@@ -2,7 +2,6 @@
 name: requirements-analysis
 description: Convert an ADO work item tagged ai:ready into functional.md + technical.md + slices.md, create child ADO Tasks, open a design PR, and notify Slack. Use when invoked by the design-gen pipeline with a work item ID.
 argument-hint: "<work-item-id>"
-allowed-tools: Read, Write, Glob, Grep, Bash(git:*), Bash(gh:*), Bash(az:*), Bash(curl:*), Bash(jq:*), Bash(yq:*), Bash(.github/scripts/*)
 ---
 
 # Requirements analysis → design + slicing

@@ -2,7 +2,6 @@
 name: security-review
 description: Review a PR diff for security issues — OWASP Top 10, LLM-specific risks, injection, secrets, auth, and data exposure. Posts PR comments; never approves.
 argument-hint: "<pr-id>"
-allowed-tools: Read, Grep, Glob, Bash(git:*), Bash(az:*), Bash(jq:*), Bash(.github/scripts/*)
 ---
 
 # Security review

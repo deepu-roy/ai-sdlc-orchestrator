@@ -60,21 +60,32 @@ recommended_skills:
 
 # Commands the hooks and pipelines run.
 gates:
-  pre_commit: "<lint-and-quick-test command>"
-  pre_merge:  "<full-build-and-test command>"
-  unit_test:  "<project's unit test command>"
-  integration_test: "<project's integration test command>"
+  pre_commit: "<lint-and-quick-test command, e.g. pnpm lint && pnpm test --run>"
+  pre_merge:  "<full-build-and-test command, e.g. pnpm build && dotnet test>"
+  unit_test:  "<unit test command, e.g. pnpm test --run>"
+  integration_test: "<integration test command, e.g. pnpm test:integration>"
   format:     "<formatter command, e.g. pnpm prettier --write>"
+
+  # Compile checks — run after tests, before commit
   compile:
-    frontend: "<e.g. pnpm build>"
-    backend:  "<e.g. dotnet build>"
+    frontend: "<e.g. pnpm build, or n/a if no frontend>"
+    backend:  "<e.g. dotnet build, or n/a if no backend>"
+
+  # Startup commands — run the app for verification
   startup:
-    frontend: "<e.g. pnpm dev>"
-    backend:  "<e.g. dotnet run>"
+    frontend: "<e.g. pnpm dev, or n/a>"
+    backend:  "<e.g. dotnet run --project apps/api, or n/a>"
+
+  # Healthchecks — must return exit 0 when app is up
   healthcheck:
-    frontend: "<e.g. curl -sf http://localhost:3000 > /dev/null>"
-    backend:  "<e.g. curl -sf http://localhost:5000/health > /dev/null>"
+    frontend: "<e.g. curl -sf http://localhost:3000 > /dev/null, or n/a>"
+    backend:  "<e.g. curl -sf http://localhost:5000/health > /dev/null, or n/a>"
+
+  # How long to wait between starting the app and hitting healthcheck
   startup_wait_seconds: 15
+
+  # Set true to skip browser verification (e.g. headless backend project)
+  skip_browser_verification: false
 
 # Paths that github copilot must never auto-edit. Implementations that require these
 # will be flagged for human pairing. Keep this list small and deliberate.

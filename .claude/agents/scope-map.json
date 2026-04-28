@@ -29,5 +29,20 @@
     "read_write": [],
     "read_only":  ["**"],
     "denied":     ["*.env", "*.pem", "*.key"]
+  },
+  "verify-story": {
+    "read_write": [
+    "docs/designs/WI-*/verification.md",
+    "docs/designs/WI-*/screenshots/**"
+    ],
+    "read_only":  ["**"],
+      "denied":     [
+      "*.env",
+      "*.pem",
+      "*.key",
+      ".claude/skills/**",
+      ".azure-pipelines/**",
+      ".github/workflows/**"
+    ]
   }
 }
