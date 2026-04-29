@@ -76,22 +76,29 @@ jobs:
             echo "--- Processing WI-$wi_id ---"
 
             # 1. Dispatch design-gen for this work item.
-            gh api "repos/${{ github.repository }}/dispatches" \
-              --method POST \
-              --field event_type='ado-workitem-ai-ready' \
-              --field 'client_payload={"work_item_id":"'"$wi_id"'"}' \
+            jq -n --arg wi_id "$wi_id" \
+              '{"event_type":"ado-workitem-ai-ready","client_payload":{"work_item_id":$wi_id}}' \
+              | gh api "repos/${{ github.repository }}/dispatches" \
+                  --method POST \
+                  --input - \
               && { echo "Dispatched design-gen for WI-$wi_id"; dispatched="$dispatched WI-$wi_id"; } \
               || { echo "::error::Failed to dispatch for WI-$wi_id"; failed="$failed WI-$wi_id"; continue; }
 
-            # 2. Replace 'ai:ready' with 'ai:processing' to prevent re-dispatch
+            # 2. Remove 'ai:ready' and add 'ai:processing' to prevent re-dispatch
             #    on the next hourly poll. Read current tags first so we don't lose others.
             existing_tags=$(az boards work-item show --id "$wi_id" --output json \
               | jq -r '.fields["System.Tags"] // ""')
 
-            new_tags=$(echo "$existing_tags" \
-              | sed 's/\bai:ready\b/ai:processing/g' \
-              | sed 's/; *;/;/g' \
-              | sed 's/^; *//;s/ *;$//')
+            # Split on ';', trim whitespace, drop 'ai:ready', rejoin, append 'ai:processing'.
+            # Avoids \b word-boundary issues with the colon in the tag name.
+            filtered=$(echo "$existing_tags" \
+              | tr ';' '\n' \
+              | sed 's/^ *//;s/ *$//' \
+              | grep -v '^ai:ready$' \
+              | grep -v '^$' \
+              | paste -sd '; ' -)
+            new_tags="${filtered:+${filtered}; }ai:processing"
+
 
             az boards work-item update --id "$wi_id" \
               --fields "System.Tags=$new_tags" \
