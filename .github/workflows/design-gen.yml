@@ -9,14 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       work_item_id:
-        description: 'ADO Work Item ID tagged ai:ready'
+        description: "ADO Work Item ID tagged ai:ready"
         required: true
         type: string
   repository_dispatch:
     types: [ado-workitem-ai-ready]
 
 env:
-  COPILOT_TOKEN: ${{ secrets.COPILOT_TOKEN }}
   ADO_PAT: ${{ secrets.ADO_PAT }}
   SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
@@ -60,7 +59,7 @@ jobs:
             project="${{ vars.ADO_PROJECT }}"
 
       - name: Make scripts executable
-        run: chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
+        run: chmod +x .github/scripts/*.sh .github/hooks/*.sh
 
       - name: Configure git identity
         run: |
@@ -68,22 +67,26 @@ jobs:
           git config user.name "ai-sdlc[bot]"
 
       - name: Install Copilot CLI
-        run: npm install -g @github/copilot-cli
+        run: npm install -g @github/copilot
 
       - name: Run requirements-analysis
         run: |
           copilot \
-            --prompt "/requirements-analysis ${{ steps.wi.outputs.id }}" \
-            --accept-all \
+            --model claude-sonnet-4.6 \
+            --allow-all \
+            --no-ask-user \
+            --add-dir "${{ github.workspace }}" \
+            --prompt="/requirements-analysis ${{ steps.wi.outputs.id }}" \
             2>&1 | tee copilot-output.log
         env:
-          GITHUB_RUN_ID: ${{ github.run_id }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+          CLAUDE_RUN_ID: ${{ github.run_id }}
 
       - name: Archive trace
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: github-trace-${{ steps.wi.outputs.id }}
-          path: .github/trace/
+          name: claude-trace-${{ steps.wi.outputs.id }}
+          path: .claude/trace/
           retention-days: 90
           if-no-files-found: ignore

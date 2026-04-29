@@ -8,11 +8,10 @@ on:
   pull_request:
     branches: [main]
     paths-ignore:
-      - '.github/trace/**'
-      - 'docs/designs/**'
+      - ".claude/trace/**"
+      - "docs/designs/**"
 
 env:
-  COPILOT_TOKEN: ${{ secrets.COPILOT_TOKEN }}
   ADO_PAT: ${{ secrets.ADO_PAT }}
 
 jobs:
@@ -47,24 +46,27 @@ jobs:
           az extension add --name azure-devops --yes --only-show-errors
           echo "$ADO_PAT" | az devops login --organization "${{ vars.ADO_ORG_URL }}" || true
           az devops configure --defaults organization="${{ vars.ADO_ORG_URL }}" project="${{ vars.ADO_PROJECT }}" || true
-          chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
-          npm install -g @github/copilot-cli
+          chmod +x .claude/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
+          npm install -g @github/copilot
 
       - name: Run ${{ matrix.label }}
         run: |
           copilot \
+            --model claude-sonnet-4.6 \
+            --allow-all \
+            --no-ask-user \
             --agent "${{ matrix.agent }}" \
-            --prompt "Review PR #${{ github.event.pull_request.number }} on branch ${{ github.head_ref }}. Run git diff origin/main...HEAD and post your findings as PR comments. Return your JSON summary at the end." \
-            --accept-all
+            --prompt "Review PR #${{ github.event.pull_request.number }} on branch ${{ github.head_ref }}. Run git diff origin/main...HEAD and post your findings as PR comments. Return your JSON summary at the end."
         env:
-          GITHUB_RUN_ID: "${{ github.run_id }}-${{ matrix.agent }}"
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+          CLAUDE_RUN_ID: "${{ github.run_id }}-${{ matrix.agent }}"
+          
       - name: Archive trace
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trace-${{ matrix.agent }}-${{ github.event.pull_request.number }}
-          path: .github/trace/
+          path: .claude/trace/
           retention-days: 90
           if-no-files-found: ignore
