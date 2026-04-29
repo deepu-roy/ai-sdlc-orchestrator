@@ -193,7 +193,7 @@ az repos pr create \
 <from functional.md §6>
 
 ### Reviewers
-<from CODEOWNERS or .claude/project/PROFILE.md reviewers field>
+<from CODEOWNERS or .github/project/PROFILE.md reviewers field>
 EOF
 )" \
   --work-items $1 \

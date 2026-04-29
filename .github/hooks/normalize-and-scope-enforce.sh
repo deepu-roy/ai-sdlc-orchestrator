@@ -12,7 +12,7 @@ case "$tool_name" in
   *) exit 0 ;;
 esac
 
-result=$(echo "$normalized" | .claude/hooks/scope-enforce.sh 2>&1) && exit_code=$? || exit_code=$?
+result=$(echo "$normalized" | .github/hooks/scope-enforce.sh 2>&1) && exit_code=$? || exit_code=$?
 
 if [[ $exit_code -eq 2 ]]; then
   jq -cn --arg r "$result" '{permissionDecision:"deny",permissionDecisionReason:$r}'

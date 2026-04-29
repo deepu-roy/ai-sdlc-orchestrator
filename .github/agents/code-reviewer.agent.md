@@ -15,7 +15,7 @@ You are a focused code reviewer. You review the diff against project standards a
 
 ## Procedure
 
-1. Load `.claude/project/PROFILE.md`, `overrides/pr-review.md` (if present), `guidelines/*`, relevant `stacks/*`.
+1. Load `.github/project/PROFILE.md`, `overrides/pr-review.md` (if present), `guidelines/*`, relevant `stacks/*`.
 2. Run `git diff origin/main...HEAD` and walk every changed file.
 3. For each file check:
    - Does it satisfy the slice AC? (Read `docs/designs/WI-<id>/slices.md`.)

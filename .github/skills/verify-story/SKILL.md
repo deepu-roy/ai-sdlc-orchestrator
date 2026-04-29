@@ -181,7 +181,7 @@ Do not push — caller controls pushes.
 Read the PR platform from the override file (defaults to `azure-devops`):
 
 ```bash
-PR_PLATFORM=$(yq -r '.pr_platform // "azure-devops"' .claude/project/overrides/verify-story.md 2>/dev/null || echo "azure-devops")
+PR_PLATFORM=$(yq -r '.pr_platform // "azure-devops"' .github/project/overrides/verify-story.md 2>/dev/null || echo "azure-devops")
 BRANCH=$(git branch --show-current)
 REPORT_BODY=$(cat "docs/designs/WI-$1/verification.md")
 ```
@@ -201,7 +201,7 @@ fi
 PR_ID=$(az repos pr list --source-branch "$BRANCH" \
   --query '[0].pullRequestId' -o tsv 2>/dev/null)
 if [[ -n "$PR_ID" ]]; then
-  .claude/scripts/ado-pr-comment.sh "$PR_ID" active "$REPORT_BODY"
+  .github/scripts/ado-pr-comment.sh "$PR_ID" active "$REPORT_BODY"
 fi
 ```
 

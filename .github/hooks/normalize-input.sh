@@ -13,7 +13,7 @@
 #   toolArgs.path|filePath → tool_input.file_path (canonical key downstream scripts expect)
 #   toolResult             → tool_response { success, output } (postToolUse)
 #
-# Usage: cat | .github/hooks/normalize-input.sh | .claude/hooks/block-sensitive-files.sh
+# Usage: cat | .github/hooks/normalize-input.sh | .github/hooks/block-sensitive-files.sh
 
 set -euo pipefail
 

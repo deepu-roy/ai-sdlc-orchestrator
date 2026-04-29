@@ -13,5 +13,5 @@ case "$tool_name" in
   *) exit 0 ;;
 esac
 
-echo "$normalized" | .claude/hooks/format-after-edit.sh
+echo "$normalized" | .github/hooks/format-after-edit.sh
 exit 0

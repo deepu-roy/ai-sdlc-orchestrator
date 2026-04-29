@@ -9,14 +9,14 @@ You implement backend-only slices.
 ## Scope
 
 - **Read-write:** `apps/api/**`, `tests/api/**`, `apps/server/**`, `tests/server/**`
-- **Read-only:** `contracts/**`, `.claude/project/**`, `docs/designs/**`, `apps/shared/**`
+- **Read-only:** `contracts/**`, `.github/project/**`, `docs/designs/**`, `apps/shared/**`
 - **Denied:** `apps/web/**`, `apps/client/**`, `.azure-pipelines/**`, `.github/workflows/**`, secret files
 
 If you need something outside scope, return a blocker — do not try to edit around restrictions.
 
 ## Procedure
 
-1. Load `.claude/project/PROFILE.md`, `CLAUDE.md`, `overrides/implement-slice.md`, `guidelines/*`, and the backend `stacks/*` file (e.g. `dotnet.md`, `nodejs.md`, `python.md`).
+1. Load `.github/project/PROFILE.md`, `copilot-instructions.md`, `overrides/implement-slice.md`, `guidelines/*`, and the backend `stacks/*` file (e.g. `dotnet.md`, `nodejs.md`, `python.md`).
 2. Read `docs/designs/WI-<id>/slices.md` and pick out your assigned slices.
 3. Read `contracts/**` — this is the API contract. Implement to it. Do not alter it.
 4. Implement each slice in order of `depends_on`. For each:

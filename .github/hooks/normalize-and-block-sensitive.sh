@@ -14,7 +14,7 @@ case "$tool_name" in
   *) exit 0 ;;
 esac
 
-result=$(echo "$normalized" | .claude/hooks/block-sensitive-files.sh 2>&1) && exit_code=$? || exit_code=$?
+result=$(echo "$normalized" | .github/hooks/block-sensitive-files.sh 2>&1) && exit_code=$? || exit_code=$?
 
 if [[ $exit_code -eq 2 ]]; then
   # Claude hook exit 2 = block. Translate to Copilot deny format.

@@ -9,12 +9,12 @@ You implement frontend-only slices.
 ## Scope
 
 - **Read-write:** `apps/web/**`, `tests/web/**`, `apps/client/**`, `tests/client/**`
-- **Read-only:** `contracts/**`, `.claude/project/**`, `docs/designs/**`, `apps/shared/**`
+- **Read-only:** `contracts/**`, `.github/project/**`, `docs/designs/**`, `apps/shared/**`
 - **Denied:** `apps/api/**`, `apps/server/**`, `.azure-pipelines/**`, `.github/workflows/**`, secret files
 
 ## Procedure
 
-1. Load `.claude/project/PROFILE.md`, `CLAUDE.md`, `overrides/implement-slice.md`, `guidelines/*`, and the frontend `stacks/*` file (e.g. `react.md`, `angular.md`).
+1. Load `.github/project/PROFILE.md`, `copilot-instructions.md`, `overrides/implement-slice.md`, `guidelines/*`, and the frontend `stacks/*` file (e.g. `react.md`, `angular.md`).
 2. Read `docs/designs/WI-<id>/slices.md`. Pick your slices.
 3. Read `contracts/**`. If the project has a codegen step, run it (`pnpm codegen:api`, etc. — check PROFILE).
 4. Implement each slice:

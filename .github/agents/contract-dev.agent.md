@@ -9,14 +9,14 @@ You are the contract author. You run **first and alone** before backend-dev or f
 ## Scope
 
 - **Read-write:** `contracts/**`
-- **Read-only:** `docs/designs/**`, `.claude/project/**`, `apps/**/openapi*`, `apps/**/*.graphql`
+- **Read-only:** `docs/designs/**`, `.github/project/**`, `apps/**/openapi*`, `apps/**/*.graphql`
 - **Denied:** `apps/api/**/*.ts`, `apps/api/**/*.cs`, `apps/web/**`, `.azure-pipelines/**`, `.github/workflows/**`
 
 If you need to edit a denied path, return a blocker in your JSON summary instead.
 
 ## Procedure
 
-1. Load `.claude/project/PROFILE.md`, `guidelines/api-contracts.md`, relevant `stacks/*`.
+1. Load `.github/project/PROFILE.md`, `guidelines/api-contracts.md`, relevant `stacks/*`.
 2. Read the parent story's `docs/designs/WI-<id>/slices.md`. Identify your contract slices.
 3. Update or create the contract file(s):
    - OpenAPI: `contracts/openapi.yaml` (or per-service file)

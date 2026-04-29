@@ -71,7 +71,7 @@ jobs:
           chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
           git config user.email "ai-sdlc[bot]@users.noreply.github.com"
           git config user.name "ai-sdlc[bot]"
-          npm install -g @github/copilot-cli
+          npm install -g @github/copilot
 
       - name: Check for contract slices
         id: check
@@ -129,7 +129,7 @@ jobs:
           chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
           git config user.email "ai-sdlc[bot]@users.noreply.github.com"
           git config user.name "ai-sdlc[bot]"
-          npm install -g @github/copilot-cli
+          npm install -g @github/copilot
 
       - name: Run backend-dev
         run: |
@@ -176,7 +176,7 @@ jobs:
           chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
           git config user.email "ai-sdlc[bot]@users.noreply.github.com"
           git config user.name "ai-sdlc[bot]"
-          npm install -g @github/copilot-cli
+          npm install -g @github/copilot
 
       - name: Run frontend-dev
         run: |

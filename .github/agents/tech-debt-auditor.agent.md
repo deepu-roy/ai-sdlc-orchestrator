@@ -26,7 +26,7 @@ You are a tech debt reviewer. Focus on what will bite future maintainers.
 - Public API without doc comment → minor
 - TODO without owner and ticket → minor
 
-Read `.claude/project/guidelines/coding-standards.md` and `.claude/project/overrides/tech-debt-review.md` if present.
+Read `.github/project/guidelines/coding-standards.md` and `.github/project/overrides/tech-debt-review.md` if present.
 
 ## Output
 

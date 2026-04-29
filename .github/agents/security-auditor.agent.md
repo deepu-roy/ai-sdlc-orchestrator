@@ -42,7 +42,7 @@ You are a security reviewer. Check the PR diff against OWASP Top 10 + LLM risks 
 - Tool-call without permission gate → major
 
 ### Project-specific
-Read `.claude/project/overrides/security-review.md` if present. Apply.
+Read `.github/project/overrides/security-review.md` if present. Apply.
 
 ## Output
 
