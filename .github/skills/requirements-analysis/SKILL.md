@@ -66,16 +66,18 @@ Structure:
 ## 5. Success criteria (measurable)
 - <Criterion>        [source: <work item field or [NEEDS HUMAN INPUT]>]
 
-# 6. Open questions
+## 6. Open questions
 - <Question> → <who to ask>
 
-Post the question on the work item as a comment, and link it here.
+```
+
+After writing, for **each open question** in §6, execute this command (outside the document — do not write the command into functional.md):
 
 ```bash
 .github/scripts/ado-wi-update.sh $1 --discussion "Open question: <Question> → <who to ask>"
 ```
 
-After writing, run:
+Then run:
 
 ```bash
 .github/scripts/check-tech-agnostic.sh docs/designs/WI-$1/functional.md

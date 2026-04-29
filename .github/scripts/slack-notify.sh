@@ -19,3 +19,6 @@ fi
 curl -sS -X POST -H 'Content-type: application/json' \
   --data "$(jq -n --arg t "$msg" '{text:$t}')" \
   "$SLACK_WEBHOOK_URL" >/dev/null
+
+
+echo "Slack notification sent."
