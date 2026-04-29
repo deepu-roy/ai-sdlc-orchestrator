@@ -20,6 +20,8 @@ jobs:
     name: Poll ADO for ai:ready work items
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write 
 
     steps:
       - uses: actions/checkout@v4
@@ -109,4 +111,4 @@ jobs:
             .github/scripts/slack-notify.sh ":warning: ADO poller *failed* to dispatch:$failed — check the workflow run for details."
           fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
