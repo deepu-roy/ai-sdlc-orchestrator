@@ -86,7 +86,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: claude-trace-${{ steps.wi.outputs.id }}
-          path: .claude/trace/
+          name: github-trace-${{ steps.wi.outputs.id }}
+          path: .github/trace/
           retention-days: 90
           if-no-files-found: ignore
