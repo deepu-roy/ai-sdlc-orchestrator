@@ -4,7 +4,7 @@
 #       event to design-gen for each one, then replace 'ai:ready' with 'ai:processing'
 #       on the work item so re-polls do not re-fire it.
 
-name: ADO Work Item Poller
+name: Poller - WI for Analysis
 
 on:
   schedule:
@@ -20,8 +20,6 @@ jobs:
     name: Poll ADO for ai:ready work items
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write 
 
     steps:
       - uses: actions/checkout@v4
@@ -43,11 +41,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # WIQL: find non-closed work items tagged ai:ready.
-          # 'ai:processing' items are excluded because we replace 'ai:ready' with
-          # 'ai:processing' after dispatch — they no longer carry the 'ai:ready' tag.
+          # WIQL: find non-closed work items tagged ai:ready but not yet ai:processing.
+          # Both tags may coexist — excluding ai:processing here prevents re-dispatch
+          # without requiring the ai:ready tag to be removed.
           wiql="SELECT [System.Id] FROM WorkItems \
             WHERE [System.Tags] CONTAINS 'ai:ready' \
+              AND [System.Tags] NOT CONTAINS 'ai:processing' \
               AND [System.State] NOT IN ('Closed', 'Resolved', 'Removed') \
             ORDER BY [System.Id] ASC"
 
@@ -75,7 +74,7 @@ jobs:
           for wi_id in ${{ steps.query.outputs.ids }}; do
             echo "--- Processing WI-$wi_id ---"
 
-            # 1. Dispatch design-gen for this work item.
+            # 1. Dispatch design-gen for this work item.            
             jq -n --arg wi_id "$wi_id" \
               '{"event_type":"ado-workitem-ai-ready","client_payload":{"work_item_id":$wi_id}}' \
               | gh api "repos/${{ github.repository }}/dispatches" \
@@ -84,24 +83,10 @@ jobs:
               && { echo "Dispatched design-gen for WI-$wi_id"; dispatched="$dispatched WI-$wi_id"; } \
               || { echo "::error::Failed to dispatch for WI-$wi_id"; failed="$failed WI-$wi_id"; continue; }
 
-            # 2. Remove 'ai:ready' and add 'ai:processing' to prevent re-dispatch
-            #    on the next hourly poll. Read current tags first so we don't lose others.
-            existing_tags=$(az boards work-item show --id "$wi_id" --output json \
-              | jq -r '.fields["System.Tags"] // ""')
-
-            # Split on ';', trim whitespace, drop 'ai:ready', rejoin, append 'ai:processing'.
-            # Avoids \b word-boundary issues with the colon in the tag name.
-            filtered=$(echo "$existing_tags" \
-              | tr ';' '\n' \
-              | sed 's/^ *//;s/ *$//' \
-              | grep -v '^ai:ready$' \
-              | grep -v '^$' \
-              | paste -sd '; ' -)
-            new_tags="${filtered:+${filtered}; }ai:processing"
-
-
+            # 2. Add 'ai:processing' to prevent re-dispatch on the next hourly poll.
+            # The WIQL query excludes items already tagged ai:processing, so both tags can coexist.
             az boards work-item update --id "$wi_id" \
-              --fields "System.Tags=$new_tags" \
+              --fields "System.Tags=ai:processing" \
               --output none \
               && echo "Tagged WI-$wi_id as ai:processing" \
               || echo "::warning::WI-$wi_id dispatched but tag update failed — may re-fire next poll"
