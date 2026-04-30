@@ -48,9 +48,9 @@ jobs:
         run: |
           PR_NUMBER="${{ inputs.pull_request_id || github.event.pull_request.number }}"
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q '.headRefOid')
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid -q '.headRefOid')
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          HEAD_REF=$(gh pr view "$PR_NUMBER" --json headRefName -q '.headRefName')
+          HEAD_REF=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName -q '.headRefName')
           echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
