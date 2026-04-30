@@ -68,7 +68,7 @@ jobs:
           az extension add --name azure-devops --yes --only-show-errors
           echo "$ADO_PAT" | az devops login --organization "${{ vars.ADO_ORG_URL }}"
           az devops configure --defaults organization="${{ vars.ADO_ORG_URL }}" project="${{ vars.ADO_PROJECT }}"
-          chmod +x .claude/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
+          chmod +x .github/hooks/*.sh .github/scripts/*.sh
           git config user.email "ai-sdlc[bot]@users.noreply.github.com"
           git config user.name "ai-sdlc[bot]"
           npm install -g @github/copilot
@@ -90,7 +90,9 @@ jobs:
           copilot \
             --agent contract-dev \
             --prompt "Implement contract slices for WI-${{ needs.derive-wi.outputs.wi }}. Read docs/designs/WI-${{ needs.derive-wi.outputs.wi }}/slices.md for details." \
-            --accept-all
+            --model claude-sonnet-4.6 \
+            --allow-all \
+            --no-ask-user
           git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}-contract"
         env:
           CLAUDE_RUN_ID: "${{ github.run_id }}-contract"
@@ -126,7 +128,7 @@ jobs:
           az extension add --name azure-devops --yes --only-show-errors
           echo "$ADO_PAT" | az devops login --organization "${{ vars.ADO_ORG_URL }}"
           az devops configure --defaults organization="${{ vars.ADO_ORG_URL }}" project="${{ vars.ADO_PROJECT }}"
-          chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
+          chmod +x .github/hooks/*.sh .github/scripts/*.sh
           git config user.email "ai-sdlc[bot]@users.noreply.github.com"
           git config user.name "ai-sdlc[bot]"
           npm install -g @github/copilot
@@ -137,7 +139,9 @@ jobs:
           copilot \
             --agent backend-dev \
             --prompt "Implement backend slices for WI-${{ needs.derive-wi.outputs.wi }}. Read docs/designs/WI-${{ needs.derive-wi.outputs.wi }}/slices.md." \
-            --accept-all
+            --model claude-sonnet-4.6 \
+            --allow-all \
+            --no-ask-user
           git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}-backend"
         env:
           CLAUDE_RUN_ID: "${{ github.run_id }}-backend"
@@ -173,7 +177,7 @@ jobs:
           az extension add --name azure-devops --yes --only-show-errors
           echo "$ADO_PAT" | az devops login --organization "${{ vars.ADO_ORG_URL }}"
           az devops configure --defaults organization="${{ vars.ADO_ORG_URL }}" project="${{ vars.ADO_PROJECT }}"
-          chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
+          chmod +x .github/hooks/*.sh .github/scripts/*.sh
           git config user.email "ai-sdlc[bot]@users.noreply.github.com"
           git config user.name "ai-sdlc[bot]"
           npm install -g @github/copilot
@@ -184,7 +188,9 @@ jobs:
           copilot \
             --agent frontend-dev \
             --prompt "Implement frontend slices for WI-${{ needs.derive-wi.outputs.wi }}. Read docs/designs/WI-${{ needs.derive-wi.outputs.wi }}/slices.md." \
-            --accept-all
+            --model claude-sonnet-4.6 \
+            --allow-all \
+            --no-ask-user
           git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}-frontend"
         env:
           CLAUDE_RUN_ID: "${{ github.run_id }}-frontend"
