@@ -6,7 +6,7 @@ name: PR Review
 
 on:
   pull_request:
-    branches: [main]
+    branches: [master]
     paths-ignore:
       - ".claude/trace/**"
       - "docs/designs/**"

@@ -6,7 +6,7 @@ name: Post-Merge Cleanup
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 env:
   ADO_PAT: ${{ secrets.ADO_PAT }}

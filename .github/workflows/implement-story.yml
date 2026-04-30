@@ -1,5 +1,5 @@
 # Workflow: implement-story
-# Trigger: design PR merged (push to main with docs/designs/WI-* changes),
+# Trigger: design PR merged (push to master with docs/designs/WI-* changes),
 #          or manually via workflow_dispatch.
 # Role: Run contract-dev first, then backend-dev + frontend-dev in parallel.
 
@@ -13,7 +13,7 @@ on:
         required: true
         type: string
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - 'docs/designs/WI-*/**'
 
@@ -68,7 +68,7 @@ jobs:
           az extension add --name azure-devops --yes --only-show-errors
           echo "$ADO_PAT" | az devops login --organization "${{ vars.ADO_ORG_URL }}"
           az devops configure --defaults organization="${{ vars.ADO_ORG_URL }}" project="${{ vars.ADO_PROJECT }}"
-          chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
+          chmod +x .claude/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
           git config user.email "ai-sdlc[bot]@users.noreply.github.com"
           git config user.name "ai-sdlc[bot]"
           npm install -g @github/copilot
@@ -86,21 +86,21 @@ jobs:
       - name: Run contract-dev
         if: steps.check.outputs.has_contract == 'true'
         run: |
-          git checkout -b "story/WI-${{ needs.derive-wi.outputs.wi }}/contract"
+          git checkout -b "story/WI-${{ needs.derive-wi.outputs.wi }}-contract"
           copilot \
             --agent contract-dev \
             --prompt "Implement contract slices for WI-${{ needs.derive-wi.outputs.wi }}. Read docs/designs/WI-${{ needs.derive-wi.outputs.wi }}/slices.md for details." \
             --accept-all
-          git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}/contract"
+          git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}-contract"
         env:
-          GITHUB_RUN_ID: "${{ github.run_id }}-contract"
+          CLAUDE_RUN_ID: "${{ github.run_id }}-contract"
 
       - name: Prepare story branch
         run: |
-          git checkout main && git pull
+          git checkout master && git pull
           git checkout -b "story/WI-${{ needs.derive-wi.outputs.wi }}"
-          if git rev-parse --verify "origin/story/WI-${{ needs.derive-wi.outputs.wi }}/contract" >/dev/null 2>&1; then
-            git merge --no-ff "origin/story/WI-${{ needs.derive-wi.outputs.wi }}/contract"
+          if git rev-parse --verify "origin/story/WI-${{ needs.derive-wi.outputs.wi }}-contract" >/dev/null 2>&1; then
+            git merge --no-ff "origin/story/WI-${{ needs.derive-wi.outputs.wi }}-contract"
           fi
           git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}"
 
@@ -133,14 +133,14 @@ jobs:
 
       - name: Run backend-dev
         run: |
-          git checkout -b "story/WI-${{ needs.derive-wi.outputs.wi }}/backend"
+          git checkout -b "story/WI-${{ needs.derive-wi.outputs.wi }}-backend"
           copilot \
             --agent backend-dev \
             --prompt "Implement backend slices for WI-${{ needs.derive-wi.outputs.wi }}. Read docs/designs/WI-${{ needs.derive-wi.outputs.wi }}/slices.md." \
             --accept-all
-          git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}/backend"
+          git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}-backend"
         env:
-          GITHUB_RUN_ID: "${{ github.run_id }}-backend"
+          CLAUDE_RUN_ID: "${{ github.run_id }}-backend"
 
       - name: Archive trace
         if: always()
@@ -180,14 +180,14 @@ jobs:
 
       - name: Run frontend-dev
         run: |
-          git checkout -b "story/WI-${{ needs.derive-wi.outputs.wi }}/frontend"
+          git checkout -b "story/WI-${{ needs.derive-wi.outputs.wi }}-frontend"
           copilot \
             --agent frontend-dev \
             --prompt "Implement frontend slices for WI-${{ needs.derive-wi.outputs.wi }}. Read docs/designs/WI-${{ needs.derive-wi.outputs.wi }}/slices.md." \
             --accept-all
-          git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}/frontend"
+          git push --set-upstream origin "story/WI-${{ needs.derive-wi.outputs.wi }}-frontend"
         env:
-          GITHUB_RUN_ID: "${{ github.run_id }}-frontend"
+          CLAUDE_RUN_ID: "${{ github.run_id }}-frontend"
 
       - name: Archive trace
         if: always()
@@ -230,8 +230,8 @@ jobs:
           git fetch origin
 
           # Merge backend if exists
-          if git rev-parse --verify "origin/story/WI-$WI/backend" >/dev/null 2>&1; then
-            git merge --no-ff "origin/story/WI-$WI/backend" -m "Merge backend for WI-$WI" || {
+          if git rev-parse --verify "origin/story/WI-$WI-backend" >/dev/null 2>&1; then
+            git merge --no-ff "origin/story/WI-$WI-backend" -m "Merge backend for WI-$WI" || {
               echo "::error::Backend merge conflict — scope violation likely"
               echo "conflict=true" >> "$GITHUB_OUTPUT"
               exit 1
@@ -239,8 +239,8 @@ jobs:
           fi
 
           # Merge frontend if exists
-          if git rev-parse --verify "origin/story/WI-$WI/frontend" >/dev/null 2>&1; then
-            git merge --no-ff "origin/story/WI-$WI/frontend" -m "Merge frontend for WI-$WI" || {
+          if git rev-parse --verify "origin/story/WI-$WI-frontend" >/dev/null 2>&1; then
+            git merge --no-ff "origin/story/WI-$WI-frontend" -m "Merge frontend for WI-$WI" || {
               echo "::error::Frontend merge conflict — scope violation likely"
               echo "conflict=true" >> "$GITHUB_OUTPUT"
               exit 1
@@ -253,7 +253,7 @@ jobs:
         run: |
           WI="${{ needs.derive-wi.outputs.wi }}"
           gh pr create \
-            --base main \
+            --base master \
             --head "story/WI-$WI" \
             --title "WI-$WI: Implementation" \
             --body "## Implementation of WI-$WI
