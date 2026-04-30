@@ -1,5 +1,5 @@
 # Workflow: pr-review
-# Trigger: PR opened/updated on main.
+# Trigger: PR opened/updated on master.
 # Role: Run three reviewer agents in parallel. None approves.
 
 name: PR Review
@@ -11,9 +11,8 @@ on:
         description: 'Pull request number to review'
         required: true
         type: string
-  pull_request_target:
+  pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - ".claude/trace/**"
       - "docs/designs/**"
@@ -44,20 +43,18 @@ jobs:
       - name: Resolve PR metadata
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER="${{ inputs.pull_request_id || github.event.pull_request.number }}"
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid -q '.headRefOid')
-          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          HEAD_REF=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefName -q '.headRefName')
-          echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
+          PR_JSON=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER)
+          echo "head_sha=$(echo "$PR_JSON" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$(echo "$PR_JSON" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ steps.pr.outputs.head_sha }}
-          token: ${{ secrets.GH_TOKEN }}
 
       - name: Setup
         run: |
@@ -67,7 +64,7 @@ jobs:
           az extension add --name azure-devops --yes --only-show-errors
           echo "$ADO_PAT" | az devops login --organization "${{ vars.ADO_ORG_URL }}" || true
           az devops configure --defaults organization="${{ vars.ADO_ORG_URL }}" project="${{ vars.ADO_PROJECT }}" || true
-          chmod +x .github/hooks/*.sh .github/scripts/*.sh .github/hooks/*.sh
+          chmod +x .github/scripts/*.sh .github/hooks/*.sh
           npm install -g @github/copilot
 
       - name: Run ${{ matrix.label }}
@@ -81,7 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.COPILOT_TOKEN }}
           CLAUDE_RUN_ID: "${{ github.run_id }}-${{ matrix.agent }}"
-          
+
       - name: Archive trace
         if: always()
         uses: actions/upload-artifact@v4
