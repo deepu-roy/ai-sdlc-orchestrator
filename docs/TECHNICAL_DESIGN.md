@@ -1,252 +1,717 @@
 # Technical Design — AI-Assisted SDLC
 
 **Project codename:** AI-SDLC
-**Version:** 1.0 (handover to Claude Code)
+**Version:** 2.0 (shared/ canonical architecture)
 **Companion:** `FUNCTIONAL_DESIGN.md`
 
 ---
 
-## 1. Component overview
+## Table of contents
+
+1. [Overview](#1-overview)
+2. [Repository layout](#2-repository-layout)
+3. [PROFILE.md — the config backbone](#3-profilemd--the-config-backbone)
+4. [Shared skills](#4-shared-skills)
+5. [Agent architecture](#5-agent-architecture)
+6. [Scripts and config-driven execution](#6-scripts-and-config-driven-execution)
+7. [Hook system](#7-hook-system)
+8. [Pipeline stages — end to end](#8-pipeline-stages--end-to-end)
+9. [Windows developer setup](#9-windows-developer-setup)
+10. [Bootstrap deep dive](#10-bootstrap-deep-dive)
+11. [Adding a new skill](#11-adding-a-new-skill)
+12. [Extending notifications or repo integrations](#12-extending-notifications-or-repo-integrations)
+13. [Permissions model](#13-permissions-model)
+14. [Observability](#14-observability)
+15. [Cost model](#15-cost-model)
+16. [Security considerations](#16-security-considerations)
+17. [Troubleshooting](#17-troubleshooting)
+
+---
+
+## 1. Overview
+
+AI-SDLC is a pipeline that turns Azure DevOps work items into implemented, reviewed pull requests with minimal human intervention. Work items tagged `ai:ready` flow through design generation, parallel subagent implementation, and multi-dimensional PR review — all driven by Claude Code (local) or GitHub Copilot (CI).
+
+The key architectural principle is **a single canonical source for all AI behaviour**, shared by both tools. Skills, agent definitions, scripts, and project config all live in `shared/`. Both `.claude/` (Claude Code) and `.github/` (GitHub Copilot) contain only thin wrappers — a few lines of tool-specific frontmatter that point back to `shared/`.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         AZURE DEVOPS                                │
-│                                                                     │
-│  Work Item (Epic/Feature) ──tag:ai:ready──> Service Hook            │
-│                                                  │                  │
-│                                                  ▼                  │
-│                                         Pipeline: design-gen        │
-│                                                  │                  │
-│  Work Items (Tasks, children) <──── az boards ───┤                  │
-│                                                  │                  │
-│  PR: [Design] WI-<id> <──────── git/az repos ────┤                  │
-│                                                                     │
-│  Design PR merged ──────────────> Pipeline: implement-story         │
-│                                                  │                  │
-│  Feature PR (story/WI-<id>) <─── git/az repos ───┤                  │
-│                                                                     │
-│  PR opened ───────────────────> Pipeline: pr-review (3x parallel)   │
-│                                                                     │
-│  PR merged ───────────────────> Pipeline: post-merge cleanup        │
-└─────────────────────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-                                 ┌───────────────┐
-                                 │ Claude Code   │
-                                 │ (headless)    │
-                                 │   claude -p   │
-                                 └───────┬───────┘
-                                         │
-           ┌─────────────┬────────────┬──┴──┬─────────────┬──────────┐
-           ▼             ▼            ▼     ▼             ▼          ▼
-      .claude/      .claude/    .claude/  .claude/    .claude/    .claude/
-      skills/       agents/     hooks/    scripts/    project/    settings
-      (master)      (sub-       (guard-   (CLI        (project    .json
-                     agents)    rails)    wrappers)   layer)
+                         ┌──────────────────────────────┐
+                         │        AZURE DEVOPS           │
+                         │  Work Item tagged ai:ready    │
+                         │           │                   │
+                         │           ▼                   │
+                         │  ado-poller.yml (hourly)      │
+                         │   dispatches repository_      │
+                         │   dispatch event              │
+                         └──────────────┬────────────────┘
+                                        │
+                    ┌───────────────────▼─────────────────────┐
+                    │          shared/  (canonical)            │
+                    │                                          │
+                    │  skills/     agents/     scripts/        │
+                    │  (10)        (6)         (9)             │
+                    │                                          │
+                    │  project/                                │
+                    │    PROFILE.md   ◄── single config        │
+                    │    CLAUDE.md        backbone             │
+                    │    guidelines/                           │
+                    │    overrides/                            │
+                    │    stacks/                               │
+                    └──────┬────────────────┬─────────────────┘
+                           │                │
+              ┌────────────▼──┐        ┌────▼──────────────────┐
+              │  .claude/     │        │  .github/              │
+              │               │        │                        │
+              │  CLAUDE.md    │        │  copilot-             │
+              │  settings.json│        │  instructions.md      │
+              │  mcp.json     │        │  hooks/               │
+              │               │        │   hooks.json          │
+              │  hooks/       │        │   normalize-*.sh      │
+              │  (4 scripts)  │        │   block-sensitive.sh  │
+              │               │        │   scope-enforce.sh    │
+              │  agents/      │        │  agents/              │
+              │  (thin        │        │  (thin wrappers       │
+              │   wrappers)   │        │   w/ Copilot          │
+              │               │        │   frontmatter)        │
+              └───────────────┘        │                        │
+              Claude Code              │  workflows/ (5)        │
+              (local / headless)       │  instructions/ (4)     │
+                                       └────────────────────────┘
+                                       GitHub Copilot
+                                       (CI / local)
 ```
 
-## 2. Repository layout (actual paths)
+---
+
+## 2. Repository layout
 
 ```
 <repo-root>/
-├── .claude/
-│   ├── CLAUDE.md                                # global policy
-│   ├── settings.json                            # hook registrations
-│   ├── mcp.json                                 # minimal (ideally empty)
-│   ├── skills/                                  # MASTER — distributed as submodule/pkg
+│
+├── shared/                                  ← CANONICAL SOURCE — both tools read this
+│   ├── skills/                              ← 10 SKILL.md files (single source)
 │   │   ├── bootstrap-project/SKILL.md
 │   │   ├── requirements-analysis/SKILL.md
 │   │   ├── technical-slicing/SKILL.md
-│   │   ├── implement-story/SKILL.md             # orchestrator
-│   │   ├── implement-slice/SKILL.md             # single-layer impl
+│   │   ├── implement-story/SKILL.md         ← orchestrator
+│   │   ├── implement-slice/SKILL.md         ← single-slice fallback
 │   │   ├── pr-review/SKILL.md
 │   │   ├── security-review/SKILL.md
-│   │   └── tech-debt-review/SKILL.md
-│   ├── agents/
-│   │   ├── contract-dev.md
+│   │   ├── tech-debt-review/SKILL.md
+│   │   ├── update-functional/SKILL.md
+│   │   └── verify-story/
+│   │       ├── SKILL.md
+│   │       └── report-template.md
+│   │
+│   ├── agents/                              ← 6 full agent definitions
 │   │   ├── backend-dev.md
 │   │   ├── frontend-dev.md
+│   │   ├── contract-dev.md
 │   │   ├── code-reviewer.md
 │   │   ├── security-auditor.md
-│   │   └── tech-debt-auditor.md
-│   ├── hooks/
-│   │   ├── block-sensitive-files.sh             # PreToolUse — hard block
-│   │   ├── scope-enforce.sh                     # PreToolUse — subagent boundary
-│   │   ├── format-after-edit.sh                 # PostToolUse — deterministic format
-│   │   └── trace-decisions.sh                   # append-only audit log
-│   ├── scripts/
+│   │   ├── tech-debt-auditor.md
+│   │   └── scope-map.json                  ← authoritative scope boundaries
+│   │
+│   ├── scripts/                             ← 9 CLI wrapper scripts
 │   │   ├── ado-wi-show.sh
-│   │   ├── ado-wi-create-slice.sh
 │   │   ├── ado-wi-update.sh
+│   │   ├── ado-wi-create-slice.sh
 │   │   ├── ado-pr-comment.sh
-│   │   ├── slack-notify.sh
-│   │   └── check-tech-agnostic.sh
-│   └── project/                                 # OWNED BY PROJECT TEAM
-│       ├── PROFILE.md                           # from bootstrap, confirmed
-│       ├── CLAUDE.md                            # project policy overrides
-│       ├── overrides/
-│       │   ├── requirements-analysis.md
-│       │   ├── technical-slicing.md
-│       │   ├── implement-slice.md
-│       │   ├── pr-review.md
-│       │   └── security-review.md
+│   │   ├── check-compile.sh                ← reads PROFILE.md gates.compile
+│   │   ├── check-startup.sh                ← reads PROFILE.md gates.startup
+│   │   ├── check-tech-agnostic.sh
+│   │   ├── notify.sh                       ← config-driven: Slack | Teams | webhook
+│   │   └── create-pr.sh                    ← config-driven: GitHub | Azure Repos
+│   │
+│   └── project/                            ← PROJECT-OWNED configuration layer
+│       ├── PROFILE.md                      ← activated by renaming from PROFILE.draft.md
+│       ├── PROFILE.draft.md                ← bootstrap writes here; human confirms
+│       ├── CLAUDE.md                       ← project policy (overrides global policy)
 │       ├── guidelines/
 │       │   ├── coding-standards.md
 │       │   ├── error-handling.md
 │       │   ├── api-contracts.md
 │       │   └── naming.md
-│       └── stacks/                              # populated on demand
-│           ├── react.md
-│           └── dotnet.md
-├── .azure-pipelines/
+│       ├── overrides/
+│       │   ├── .gitkeep
+│       │   └── verify-story.md             ← example per-skill override
+│       └── stacks/                         ← per-stack files (populated on demand)
+│           └── <stack>.md
+│
+├── .claude/                                ← Claude Code configuration
+│   ├── CLAUDE.md                           ← global policy → references shared/project/
+│   ├── settings.json                       ← hook registrations (PreToolUse/PostToolUse)
+│   ├── mcp.json                            ← MCP server config
+│   ├── settings.local.json                 ← local overrides (gitignored)
+│   ├── hooks/                              ← hook scripts for Claude Code
+│   │   ├── block-sensitive-files.sh        ← PreToolUse: blocks secrets/pipelines/skills
+│   │   ├── scope-enforce.sh                ← PreToolUse: enforces per-subagent boundaries
+│   │   ├── format-after-edit.sh            ← PostToolUse: runs project formatter
+│   │   └── trace-decisions.sh              ← PostToolUse: append-only audit log
+│   ├── agents/                             ← thin wrappers (Claude frontmatter only)
+│   │   ├── backend-dev.md
+│   │   ├── frontend-dev.md
+│   │   ├── contract-dev.md
+│   │   ├── code-reviewer.md
+│   │   ├── security-auditor.md
+│   │   ├── tech-debt-auditor.md
+│   │   └── scope-map.json                  ← symlink or copy of shared/agents/scope-map.json
+│   └── trace/                              ← runtime audit logs (gitignored in CI)
+│       └── <run-id>.jsonl
+│
+├── .github/                                ← GitHub Copilot configuration
+│   ├── copilot-instructions.md             ← global Copilot policy → references shared/project/
+│   ├── hooks/                              ← hook scripts + normalize shims
+│   │   ├── hooks.json                      ← Copilot hook config
+│   │   ├── normalize-input.sh              ← converts Copilot JSON format → Claude format
+│   │   ├── normalize-and-block-sensitive.sh
+│   │   ├── normalize-and-scope-enforce.sh
+│   │   ├── normalize-and-format.sh
+│   │   ├── normalize-and-trace.sh
+│   │   ├── block-sensitive-files.sh        ← same logic as .claude/hooks version
+│   │   ├── scope-enforce.sh                ← same logic as .claude/hooks version
+│   │   ├── format-after-edit.sh
+│   │   └── trace-decisions.sh
+│   ├── agents/                             ← thin wrappers (Copilot frontmatter only)
+│   │   ├── backend-dev.agent.md
+│   │   ├── frontend-dev.agent.md
+│   │   ├── contract-dev.agent.md
+│   │   ├── code-reviewer.agent.md
+│   │   ├── security-auditor.agent.md
+│   │   ├── tech-debt-auditor.agent.md
+│   │   └── scope-map.json
+│   ├── instructions/                       ← per-file-type Copilot instructions
+│   │   ├── api-contracts.instructions.md
+│   │   ├── coding-standards.instructions.md
+│   │   ├── error-handling.instructions.md
+│   │   └── naming.instructions.md
+│   └── workflows/                          ← 5 GitHub Actions workflows (protected)
+│       ├── ado-poller.yml                  ← hourly: polls ADO for ai:ready items
+│       ├── design-gen.yml                  ← requirements-analysis skill
+│       ├── implement-story.yml             ← parallel subagent implementation
+│       ├── pr-review.yml                   ← 3-way parallel PR review
+│       └── post-merge.yml                  ← closes ADO items, notifies Slack
+│
+├── .azure-pipelines/                       ← Azure Pipelines YAML (protected, human-authored)
 │   ├── design-gen.yml
 │   ├── implement-story.yml
 │   ├── pr-review.yml
 │   └── post-merge.yml
+│
 └── docs/
+    ├── FUNCTIONAL_DESIGN.md
+    ├── TECHNICAL_DESIGN.md                 ← this file
     └── designs/
         └── WI-<id>/
             ├── functional.md
             ├── technical.md
-            └── slices.md
+            ├── slices.md
+            ├── verification.md             ← written by verify-story subagent
+            └── screenshots/               ← browser verification screenshots
 ```
 
-## 3. Data flow — end to end
+---
 
-### 3.1 Stage 1–3 (design generation)
+## 3. PROFILE.md — the config backbone
 
+`shared/project/PROFILE.md` is the single configuration file that controls how every skill and script behaves. It is created by `/bootstrap-project` as `PROFILE.draft.md` and activated by renaming it to `PROFILE.md`. Until `PROFILE.md` exists, all AI-SDLC skills abort with the message: `PROFILE.md not found. Run /bootstrap-project first.`
+
+### 3.1 Complete annotated example
+
+The following is a fully filled-in example for a GitHub Actions + GitHub + Slack team:
+
+```yaml
+project:
+  name: my-product
+  type: fullstack-monorepo      # frontend | backend | fullstack | infra | fullstack-monorepo
+  repo_kind: monorepo           # single | monorepo
+
+# ── Orchestration ─────────────────────────────────────────────────────────────
+# Controls which pipeline tool, repo host, and notification system the scripts use.
+orchestration:
+  pipeline_tool: github-actions          # github-actions | azure-pipelines
+  repo_host: github                      # github | azure-repos
+  work_items:
+    source: ado                          # ado is the only supported work-item source
+    org_url: https://dev.azure.com/acme
+    project: MyProduct
+  notifications:
+    type: slack                          # slack | teams | webhook
+    webhook_url: https://hooks.slack.com/services/T000/B000/xxxx
+    channel: "#engineering"              # Slack only; omit for teams/webhook
+
+# ── Stacks ────────────────────────────────────────────────────────────────────
+stacks:
+  frontend:
+    framework: react                     # source: apps/web/package.json:12
+    meta_framework: next                 # source: apps/web/package.json:13
+    language: typescript                 # source: apps/web/tsconfig.json:1
+    styling: tailwind                    # source: apps/web/tailwind.config.ts:1
+    test: vitest                         # source: apps/web/vitest.config.ts:1
+  backend:
+    framework: dotnet                    # source: apps/api/Api.csproj:3
+    language: csharp                     # source: apps/api/Api.csproj:3
+    orm: ef-core                         # source: apps/api/Api.csproj:18
+    test: xunit                          # source: tests/Api.Tests/Api.Tests.csproj:7
+  contract:
+    format: openapi
+    path: contracts/openapi.yaml
+  infra:
+    ci: github-actions                   # source: .github/workflows/ directory present
+    iac: bicep                           # source: infra/*.bicep files
+    container: docker                    # source: Dockerfile at repo root
+
+conventions_detected:
+  - "Monorepo with pnpm workspaces"      # source: pnpm-workspace.yaml:1
+  - "API follows CQRS pattern"           # source: apps/api/Commands/, apps/api/Queries/
+
+recommended_skills:
+  always:
+    - requirements-analysis
+    - technical-slicing
+    - implement-story
+    - implement-slice
+    - pr-review
+    - security-review
+    - tech-debt-review
+  stack_specific:
+    - react-patterns
+    - dotnet-patterns
+  not_applicable: []
+
+# Commands the hooks and pipelines run.
+gates:
+  pre_commit: "pnpm lint && pnpm test --run"
+  pre_merge:  "pnpm build && dotnet test"
+  unit_test:  "pnpm test --run"
+  integration_test: "pnpm test:integration"
+  format:     "pnpm prettier --write"
+
+  compile:
+    frontend: "pnpm build"
+    backend:  "dotnet build"
+
+  startup:
+    frontend: "pnpm dev"
+    backend:  "dotnet run --project apps/api"
+
+  healthcheck:
+    frontend: "curl -sf http://localhost:3000 > /dev/null"
+    backend:  "curl -sf http://localhost:5000/health > /dev/null"
+
+  startup_wait_seconds: 15
+  skip_browser_verification: false
+
+quarantined_paths: []     # add paths AI must never auto-edit
+reviewers: []             # ADO reviewer login names for auto-assignment
 ```
-1. Work item tagged ai:ready
-2. ADO Service Hook → POST webhook to pipeline
-3. Pipeline checks out repo, az login via PAT
-4. ClaudeCodeBaseTask runs:
-     claude -p "/requirements-analysis <id>" \
-       --output-format stream-json \
-       --max-turns 30 \
-       --allowed-tools "Read,Write,Bash(git:*),Bash(az:*),Bash(gh:*),Bash(curl:*)"
-5. Skill procedure:
-     5a. Read ADO work item          → az boards work-item show --id <id>
-     5b. Load project layer          → Read PROFILE.md, CLAUDE.md, overrides, guidelines
-     5c. Generate 3 design docs      → Write functional.md / technical.md / slices.md
-     5d. Tech-agnostic check         → Bash: check-tech-agnostic.sh
-     5e. Create child work items     → az boards work-item create (loop)
-     5f. Commit + push + open PR     → git + az repos pr create
-     5g. Notify Slack                → curl webhook
-6. Pipeline archives claude-trace-<id>.jsonl.gz
+
+### 3.2 Field reference
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `project.name` | string | yes | Human-readable project name |
+| `project.type` | enum | yes | One of: `frontend`, `backend`, `fullstack`, `infra`, `fullstack-monorepo` |
+| `project.repo_kind` | enum | yes | `single` or `monorepo` |
+| `orchestration.pipeline_tool` | enum | yes | `github-actions` or `azure-pipelines` |
+| `orchestration.repo_host` | enum | yes | `github` or `azure-repos` — drives `create-pr.sh` |
+| `orchestration.work_items.source` | enum | yes | Always `ado` in current release |
+| `orchestration.work_items.org_url` | URL | yes | ADO organization URL |
+| `orchestration.work_items.project` | string | yes | ADO project name |
+| `orchestration.notifications.type` | enum | yes | `slack`, `teams`, or `webhook` — drives `notify.sh` |
+| `orchestration.notifications.webhook_url` | URL | yes | Incoming webhook URL |
+| `orchestration.notifications.channel` | string | Slack only | Target channel, e.g. `#engineering` |
+| `stacks.*` | object | recommended | Detected stack; each field carries a `# source:` comment |
+| `gates.pre_commit` | shell command | recommended | Runs before commits during implementation |
+| `gates.pre_merge` | shell command | recommended | Runs before feature PR is opened |
+| `gates.compile.frontend` | shell command | optional | `check-compile.sh` runs this; `n/a` to skip |
+| `gates.compile.backend` | shell command | optional | `check-compile.sh` runs this; `n/a` to skip |
+| `gates.startup.frontend` | shell command | optional | `check-startup.sh` starts the frontend process |
+| `gates.startup.backend` | shell command | optional | `check-startup.sh` starts the backend process |
+| `gates.healthcheck.frontend` | shell command | optional | HTTP check after startup wait |
+| `gates.healthcheck.backend` | shell command | optional | HTTP check after startup wait |
+| `gates.startup_wait_seconds` | int | optional | Default 15; seconds to wait after starting app |
+| `gates.skip_browser_verification` | bool | optional | Default false; set true to skip verify-story |
+| `quarantined_paths` | string[] | optional | Paths AI must never touch; enforced by scope-enforce |
+| `reviewers` | string[] | optional | ADO login names auto-added as PR reviewers |
+
+---
+
+## 4. Shared skills
+
+### 4.1 Discovery and path convention
+
+Skills live at `shared/skills/<name>/SKILL.md`. Both Claude Code and GitHub Copilot load them:
+
+- **Claude Code:** The global `.claude/CLAUDE.md` references skills by name. Claude Code resolves `shared/skills/<name>/SKILL.md` when a skill is invoked. There are no per-skill wrapper files in `.claude/skills/` — both tools discover directly from `shared/`.
+- **GitHub Copilot:** The `copilot-instructions.md` defines the same load order. Copilot reads skill files from `shared/skills/<name>/SKILL.md` when invoked by name.
+
+### 4.2 Load order — mandatory
+
+Every skill and agent, before generating its primary artifact, loads context files in this exact order:
+
+1. `shared/project/PROFILE.md` — **required**; abort if absent with the message `Run /bootstrap-project first.`
+2. `shared/project/CLAUDE.md` — project policy (optional; continue if missing)
+3. `shared/project/overrides/<this-skill-name>.md` — skill-specific override (optional)
+4. All files in `shared/project/guidelines/` — coding standards, error handling, naming, API contracts
+5. Stack files in `shared/project/stacks/` matching the detected frameworks in PROFILE
+
+If `PROFILE.md` is missing, execution stops. All other files are optional — missing files are expected on new projects and cause no error.
+
+### 4.3 Skill inventory
+
+| Skill | Trigger | Primary output |
+|---|---|---|
+| `bootstrap-project` | Human: `/bootstrap-project` | `shared/project/PROFILE.draft.md` + scaffolded guideline stubs |
+| `requirements-analysis` | Pipeline: `/requirements-analysis <id>` | `docs/designs/WI-<id>/functional.md`, `technical.md`, `slices.md` |
+| `technical-slicing` | Chained from `requirements-analysis` | `slices.md` with YAML schema; ADO child Task work items |
+| `implement-story` | Pipeline: `/implement-story <id>` | Feature PR on `story/WI-<id>`; delegates to subagents |
+| `implement-slice` | Single-slice fallback or manual | Commit on assigned sub-branch |
+| `pr-review` | Pipeline: subagent per job | PR comments with severity tags; no writes to code |
+| `security-review` | Pipeline: subagent per job | Security-focused PR comments |
+| `tech-debt-review` | Pipeline: subagent per job | Tech-debt-focused PR comments |
+| `update-functional` | Manual: `/update-functional <id>` | Updates `functional.md` to reflect post-implementation reality |
+| `verify-story` | Spawned by `implement-story` | `docs/designs/WI-<id>/verification.md`; browser AC verification |
+
+### 4.4 Tech-agnostic functional doc rule
+
+`functional.md` must not contain framework, protocol, or cloud-service names. `check-tech-agnostic.sh` enforces a grep blocklist against the file and exits non-zero on any match. The blocked terms include: `OAuth`, `JWT`, `REST`, `GraphQL`, `gRPC`, `PostgreSQL`, `MySQL`, `Redis`, `MongoDB`, `React`, `Angular`, `Vue`, `Next`, `Svelte`, `Kubernetes`, `Docker`, `AWS`, `Lambda`, `S3`, `Cosmos`, `RabbitMQ`, `Kafka`, `Azure` (as cloud service name). These terms are permitted in `technical.md`.
+
+---
+
+## 5. Agent architecture
+
+### 5.1 Two-layer design
+
+Every agent has two components:
+
+**Layer 1 — Thin wrapper** (tool-specific, in `.claude/agents/` or `.github/agents/`):
+Contains only the tool's required frontmatter (name, description, tools list) and a single `See shared/agents/<name>.md` reference. No procedure. No logic.
+
+**Layer 2 — Full definition** (shared, in `shared/agents/<name>.md`):
+Contains the complete procedure, scope declaration, output contract, and blocker rules. One file, referenced by both tools.
+
+### 5.2 Frontmatter differences
+
+**Claude Code wrapper** (`.claude/agents/backend-dev.md`):
+```yaml
+---
+name: backend-dev
+description: Implement backend slices — server code, data layer, business logic, and their
+  tests. Operates only within backend paths. Used by the implement-story orchestrator.
+tools: [Read, Write, Edit, Glob, Grep, Bash(git:*), Bash(dotnet:*), Bash(npm:*),
+  Bash(pnpm:*), Bash(npx:*), Bash(python:*), Bash(go:*), Bash(mvn:*), Bash(gradle:*),
+  Bash(jq:*), Bash(yq:*), Bash(shared/scripts/*)]
+context: fork
+---
+
+See `shared/agents/backend-dev.md` for the full procedure, scope, and output contract.
 ```
 
-### 3.2 Stage 4 (story implementation, parallel)
+**Copilot wrapper** (`.github/agents/backend-dev.agent.md`):
+```yaml
+---
+name: backend-dev
+description: Implement backend slices — server code, data layer, business logic, and their
+  tests. Operates only within backend paths. Triggers on "backend", "api", "server",
+  "service layer", "data access", "migration".
+tools: ["read", "edit", "search", "execute"]
+---
 
-```
-1. Design PR merged → ADO Service Hook → implement-story pipeline
-2. Pipeline runs orchestrator:
-     claude -p "/implement-story <id>" --max-turns 120
-3. Orchestrator procedure:
-     3a. Load slices.md, group by layer
-     3b. If contract slice exists → spawn contract-dev (Task tool), wait
-     3c. Spawn backend-dev + frontend-dev in parallel (Task tool)
-     3d. Merge branches into story/WI-<id>
-     3e. Run tests
-     3f. Open feature PR
-     3g. Update ADO work items to Resolved
-     3h. Notify Slack
-4. Subagent procedure (each):
-     - Fork context, load scoped tools
-     - Read only their assigned slice + PROFILE + overrides + relevant stacks/*
-     - PreToolUse hook enforces file-path scope
-     - Write code, write tests, run tests
-     - Commit on own sub-branch
-     - Return summary to orchestrator
+See `shared/agents/backend-dev.md` for the full procedure, scope, and output contract.
 ```
 
-### 3.3 Stage 5–6 (PR checks + review)
+The key differences: Claude Code uses `context: fork` and a specific `Bash(command:*)` whitelist; Copilot uses generic tool names and relies on its own permission system.
 
+### 5.3 scope-map.json
+
+`shared/agents/scope-map.json` (also present as `.claude/agents/scope-map.json` and `.github/agents/scope-map.json`) defines per-subagent file boundaries. The `scope-enforce.sh` hook reads this file at runtime. Precedence: `denied` wins over `read_only` wins over `read_write`.
+
+```json
+{
+  "contract-dev": {
+    "read_write": ["contracts/**"],
+    "read_only": ["docs/designs/**", "shared/project/**", "apps/**/openapi*", "apps/**/*.graphql"],
+    "denied": ["apps/api/**", "apps/web/**", ".azure-pipelines/**", ".github/workflows/**",
+               "shared/skills/**", "*.env", "*.pem", "*.key"]
+  },
+  "backend-dev": {
+    "read_write": ["apps/api/**", "tests/api/**", "apps/server/**", "tests/server/**"],
+    "read_only": ["contracts/**", "shared/project/**", "docs/designs/**", "apps/shared/**"],
+    "denied": ["apps/web/**", "apps/client/**", ".azure-pipelines/**", ".github/workflows/**",
+               "shared/skills/**", "*.env", "*.pem", "*.key"]
+  },
+  "frontend-dev": {
+    "read_write": ["apps/web/**", "tests/web/**", "apps/client/**", "tests/client/**"],
+    "read_only": ["contracts/**", "shared/project/**", "docs/designs/**", "apps/shared/**"],
+    "denied": ["apps/api/**", "apps/server/**", ".azure-pipelines/**", ".github/workflows/**",
+               "shared/skills/**", "*.env", "*.pem", "*.key"]
+  },
+  "code-reviewer": { "read_write": [], "read_only": ["**"], "denied": ["*.env","*.pem","*.key"] },
+  "security-auditor": { "read_write": [], "read_only": ["**"], "denied": [] },
+  "tech-debt-auditor": { "read_write": [], "read_only": ["**"], "denied": ["*.env","*.pem","*.key"] },
+  "verify-story": {
+    "read_write": ["docs/designs/WI-*/verification.md", "docs/designs/WI-*/screenshots/**"],
+    "read_only": ["**"],
+    "denied": ["*.env","*.pem","*.key","shared/skills/**",".azure-pipelines/**",".github/workflows/**"]
+  }
+}
 ```
-1. Feature PR opened → pr-review pipeline triggers
-2. Three parallel jobs, one subagent each:
-     - code-reviewer
-     - security-auditor
-     - tech-debt-auditor
-3. Each subagent:
-     - git diff origin/main...HEAD
-     - Read CLAUDE.md + project layer
-     - Post findings via az repos pr update --description + inline comments
-     - Tag severity: blocker / major / minor / nit
-4. Subagents never approve. Human approves.
-5. On merge → post-merge pipeline updates ADO + Slack
+
+A merge conflict between backend and frontend sub-branches always indicates a scope violation, because their `read_write` paths are declared disjoint.
+
+### 5.4 Subagent return contract
+
+Every subagent ends its run with a JSON block the orchestrator parses:
+
+```json
+{
+  "subagent": "backend-dev",
+  "slices_implemented": ["S2", "S4"],
+  "branch": "story/WI-1234/backend",
+  "commit_sha": "abc123",
+  "tests": { "unit": "passed", "integration": "passed" },
+  "files_touched": ["apps/api/Handlers/CreateOrderHandler.cs"],
+  "blockers": [],
+  "questions": []
+}
 ```
 
-## 4. Master skill — specifications
+If `blockers` or `questions` is non-empty, the orchestrator does not merge — it opens a draft PR with the blockers surfaced at the top and comments on the parent ADO work item.
 
-### 4.1 bootstrap-project
+---
 
-| Attribute | Value |
+## 6. Scripts and config-driven execution
+
+All scripts in `shared/scripts/` are idempotent where possible, exit non-zero on failure, and log to stderr. Scripts may be called by skills, by workflows, or directly by developers.
+
+### 6.1 Script inventory
+
+| Script | Purpose |
 |---|---|
-| Trigger | Human: `claude -p "/bootstrap-project"` |
-| Invocation | `disable-model-invocation: true` (humans only) |
-| Tools | Read, Write, Glob, Grep, Bash(git:*), Bash(ls:*), Bash(cat:*), Bash(find:*) |
-| Produces | `shared/project/PROFILE.draft.md` + skeleton `guidelines/`, `stacks/`, `overrides/` placeholders |
-| Must not | Commit, push, edit master skills, write `PROFILE.md` (only `.draft.md`) |
+| `ado-wi-show.sh <id>` | Print ADO work item JSON: `az boards work-item show --id <id>` |
+| `ado-wi-update.sh <id> --state <s> --discussion <text>` | Update work item state and append discussion comment |
+| `ado-wi-create-slice.sh <parent-id> <slice-yaml>` | Create a child Task work item from a slice YAML file |
+| `ado-pr-comment.sh <pr-id> <thread-status> <comment-file>` | Post a comment thread on an ADO PR |
+| `check-compile.sh [frontend\|backend\|both]` | Reads `gates.compile.<layer>` from PROFILE.md and runs it |
+| `check-startup.sh [frontend\|backend\|both]` | Starts app, waits `startup_wait_seconds`, runs healthcheck, kills |
+| `check-tech-agnostic.sh <file>` | Grep blocklist against a file; exits non-zero on any forbidden term |
+| `notify.sh <message>` | Config-driven notification (see below) |
+| `create-pr.sh --title <t> --body <b> --branch <br> [--base <base>]` | Config-driven PR creation (see below) |
 
-Detection matrix:
+### 6.2 notify.sh — branching logic
 
-| Signal file | Infers |
-|---|---|
-| `package.json` with `react` dep | Frontend framework: React; check for Next, Vite |
-| `package.json` with `@angular/core` | Frontend framework: Angular |
-| `*.csproj`, `global.json` | Backend: .NET; version from TargetFramework |
-| `pyproject.toml`, `requirements.txt` | Backend: Python |
-| `go.mod` | Backend: Go |
-| `pom.xml`, `build.gradle*` | Backend: JVM |
-| `angular.json`, `nx.json`, `pnpm-workspace.yaml`, `lerna.json` | Monorepo |
-| `.azure-pipelines/`, `azure-pipelines.yml` | CI: Azure Pipelines |
-| `.github/workflows/` | CI: GitHub Actions |
-| `vitest.config.*`, `jest.config.*` | JS test framework |
-| `tests/*Tests.csproj`, `xunit` refs | .NET test framework |
-| `Dockerfile*`, `docker-compose*` | Container present |
-| `infra/*.bicep`, `*.tf`, `helm/` | IaC tool |
+`notify.sh` reads `orchestration.notifications.type` and `orchestration.notifications.webhook_url` from `shared/project/PROFILE.md` using `yq`. If PROFILE.md is absent or the notification fields contain `[NEEDS HUMAN INPUT]`, the script exits 0 silently — a missing notification config is never a pipeline failure.
 
-### 4.2 requirements-analysis
+When configured:
+- **`type: slack`** — constructs a JSON payload `{text, channel}` (channel included if the `channel` field is set). Posts to the webhook URL with `curl`. A Slack incoming webhook ignores the `channel` field if the app has a fixed channel.
+- **`type: teams`** — constructs a MessageCard payload `{"@type":"MessageCard","text":"..."}`. Posts to the Power Automate / Teams webhook URL.
+- **`type: webhook`** — constructs a minimal `{text, timestamp}` JSON payload. Posts to any generic HTTP endpoint.
 
-| Attribute | Value |
-|---|---|
-| Trigger | Pipeline: `/requirements-analysis <work-item-id>` |
-| Tools | Read, Write, Bash(git:*), Bash(az:*), Bash(gh:*), Bash(curl:*) |
-| Produces | `docs/designs/WI-<id>/{functional,technical,slices}.md` + child work items + design PR + Slack post |
-| Policy | Tech-agnostic functional doc (blocklist enforced via `check-tech-agnostic.sh`); every claim cites source |
+All three variants use `curl -sS -X POST -H 'Content-type: application/json'` and write nothing to stdout on success; the caller sees a one-line confirmation message on stdout.
 
-Tech-agnostic blocklist (grep'd):
+### 6.3 create-pr.sh — branching logic
+
+`create-pr.sh` reads `orchestration.repo_host` from PROFILE.md using `yq`. If PROFILE.md is absent, it defaults to `github`. The `--body` argument can be either literal text or `@path/to/file` (the `@` prefix triggers a file read).
+
+- **`repo_host: github`** — calls `gh pr create --title ... --body ... --head ... --base ...`. Requires `gh` CLI authenticated (via `GH_TOKEN` env var in CI, or `gh auth login` locally).
+- **`repo_host: azure-repos`** — calls `az repos pr create --title ... --description ... --source-branch ... --target-branch ...`. Requires `az` CLI with the `azure-devops` extension and an active `az devops login` session.
+
+---
+
+## 7. Hook system
+
+Hooks run before and after every tool call to enforce guardrails. The two tools have different hook mechanisms, but share the same underlying logic via the `shared/` scripts.
+
+### 7.1 Claude Code hooks (settings.json)
+
+`.claude/settings.json` registers hooks using Claude Code's `PreToolUse` / `PostToolUse` event model:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": ".claude/hooks/block-sensitive-files.sh" },
+          { "type": "command", "command": ".claude/hooks/scope-enforce.sh" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": ".claude/hooks/format-after-edit.sh" }]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [{ "type": "command", "command": ".claude/hooks/trace-decisions.sh" }]
+      }
+    ]
+  }
+}
+```
+
+Each hook receives the full tool-call payload as JSON on stdin. To **allow** the tool call, exit 0. To **block** it, exit 2 — Claude Code surfaces the stderr output to the model as the reason for the block.
+
+### 7.2 Copilot hooks (hooks.json)
+
+`.github/hooks/hooks.json` registers hooks using Copilot's hook mechanism:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      { "type": "command", "bash": ".github/hooks/normalize-and-block-sensitive.sh", "timeoutSec": 10 },
+      { "type": "command", "bash": ".github/hooks/normalize-and-scope-enforce.sh", "timeoutSec": 10 }
+    ],
+    "postToolUse": [
+      { "type": "command", "bash": ".github/hooks/normalize-and-format.sh", "timeoutSec": 30 },
+      { "type": "command", "bash": ".github/hooks/normalize-and-trace.sh", "timeoutSec": 5 }
+    ]
+  }
+}
+```
+
+Copilot hook scripts cannot use exit 2 to signal a block. Instead, they write a JSON denial to stdout:
+
+```json
+{"permissionDecision": "deny", "permissionDecisionReason": "BLOCKED: file.env is a secret file."}
+```
+
+### 7.3 The normalize shims
+
+Copilot sends tool-call JSON in a different shape than Claude Code:
+
+| Field | Claude Code | Copilot |
+|---|---|---|
+| Tool name key | `tool_name` | `toolName` |
+| Tool arguments key | `tool_input` (object) | `toolArgs` (JSON string) |
+| File path key | `tool_input.file_path` | `toolArgs.path` or `toolArgs.filePath` |
+| Result key | `tool_response` | `toolResult` |
+| Tool name casing | PascalCase (`Edit`) | lowercase (`edit`) |
+
+Each `normalize-and-*.sh` script pipes stdin through `normalize-input.sh` first, which detects the Copilot format (presence of `toolName` without `tool_name`) and converts it to the Claude Code shape. The downstream `block-sensitive-files.sh` and `scope-enforce.sh` scripts then operate on the normalized payload exactly as they do in the Claude Code path.
+
+After normalization, exit code 2 from the shared hook script is caught and translated to the Copilot JSON denial format.
+
+### 7.4 What each hook does
+
+**block-sensitive-files.sh** (PreToolUse, Edit|Write events):
+
+Blocks writes to:
+- Secrets: `*.env`, `*.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*secret*`, `*secrets*`, `*credentials*`, `*.pgpass`, `*id_rsa*`, `*id_ed25519*`
+- Pipeline configs: `.azure-pipelines/*`, `.github/workflows/*`, `.gitlab-ci.yml`, `Jenkinsfile`, `azure-pipelines.yml`
+- Master skills: `shared/skills/**`, `.claude/skills/**`, `.claude/CLAUDE.md`, `.claude/settings.json`, `.claude/mcp.json`
+- Scope maps: `.claude/agents/scope-map.json`, `shared/agents/scope-map.json`
+
+The message on block: `"BLOCKED by block-sensitive-files: <file>. If this is intentional, a human must author the change."`
+
+**scope-enforce.sh** (PreToolUse, Edit|Write events):
+
+Reads the calling subagent's name from `payload.subagent_type` (or `.subagent`). If the payload has no subagent context (main agent), this hook is a no-op. Otherwise, loads the subagent's scope from `scope-map.json` and evaluates the target file path against `denied`, `read_only`, and `read_write` globs (in that precedence order). Blocks are logged to `.claude/trace/scope-blocks.jsonl`.
+
+**format-after-edit.sh** (PostToolUse, Edit|Write events):
+
+Runs the project formatter on the edited file. The formatter is inferred from file extension: `.ts/.tsx/.js/.jsx/.json/.md/.yml/.yaml` → prettier via `pnpm` or `npx`; `.cs` → `dotnet format`; `.py` → `ruff format` or `black`; `.go` → `gofmt`. Never fails the turn — formatter errors are logged to `.claude/trace/format-failures.jsonl` and execution continues.
+
+**trace-decisions.sh** (PostToolUse, all tools):
+
+Appends one JSON line per tool call to `.claude/trace/<run-id>.jsonl`. The run ID comes from `$CLAUDE_RUN_ID` (set by CI workflows), then `$BUILD_BUILDID` (Azure Pipelines), then falls back to `local-<date>-<pid>`. The line contains: timestamp, run_id, subagent name, tool name, file path, command (truncated to 200 chars), and success status.
+
+---
+
+## 8. Pipeline stages — end to end
+
+The system has five pipeline stages. GitHub Actions workflows are the reference implementation; `.azure-pipelines/` contains the same logic for Azure Pipelines.
+
+### 8.1 Stage 0 — ADO polling (ado-poller.yml)
+
+Runs every hour via cron. Queries ADO with WIQL for work items tagged `ai:ready` but not `ai:processing`, in non-terminal states. For each match:
+
+1. Fires a `repository_dispatch` event (`ado-workitem-ai-ready`) with the work item ID in the payload.
+2. Tags the work item with `ai:processing` to prevent re-dispatch on the next poll.
+
+Slack notification on empty queue: `"No work items tagged ai:ready pending."`. Slack notification on dispatched items: `"Dispatched WI-X, WI-Y for requirement analysis."`.
+
+### 8.2 Stage 1 — Design generation (design-gen.yml)
+
+Triggered by `repository_dispatch` from the poller, or manually via `workflow_dispatch`.
 
 ```
-OAuth, JWT, REST, GraphQL, gRPC, PostgreSQL, MySQL, Redis, MongoDB,
-React, Angular, Vue, Next, Svelte, Kubernetes, Docker, AWS, Azure
-(as cloud service), Lambda, S3, Cosmos, RabbitMQ, Kafka
+1. Resolve work item ID (from dispatch payload or manual input)
+2. Install jq, yq, az devops extension
+3. az devops login with ADO_PAT
+4. chmod +x all hook and script files
+5. npm install -g @github/copilot
+6. Run Copilot with /requirements-analysis <id>
+7. Archive .github/trace/ as artifact (90-day retention)
 ```
 
-These are permitted in `technical.md`, banned in `functional.md`. The check script exits non-zero on violations.
+The skill procedure:
+- Reads the ADO work item via `shared/scripts/ado-wi-show.sh`
+- Loads the project layer (PROFILE → CLAUDE.md → overrides → guidelines → stacks)
+- Generates `docs/designs/WI-<id>/functional.md`, `technical.md`, and `slices.md`
+- Runs `check-tech-agnostic.sh` on `functional.md`
+- Creates ADO child Task work items for each slice via `ado-wi-create-slice.sh`
+- Commits design docs, pushes, opens a design PR via `create-pr.sh`
+- Notifies Slack via `notify.sh`
 
-### 4.3 technical-slicing
+### 8.3 Stage 2 — Story implementation (implement-story.yml)
 
-Chained from `requirements-analysis`. Same trigger, same run.
+Triggered on push to `master` where `docs/designs/WI-*/**` paths changed, or manually.
 
-| Attribute | Value |
-|---|---|
-| Output | `slices.md` with YAML schema (see 4.3.1); one ADO Task per slice |
-| Rules | One slice = one PR-sized unit; disjoint file scopes between parallel slices; every slice has measurable AC, impact, risk, test plan |
+The workflow has five jobs:
 
-#### 4.3.1 Slice schema
+| Job | Depends on | What it does |
+|---|---|---|
+| `derive-wi` | — | Extracts WI number from merge commit message or manual input |
+| `contract` | `derive-wi` | Runs `contract-dev` if slices.md contains `layer: contract` slices; creates `story/WI-<id>` base branch |
+| `backend` | `derive-wi`, `contract` | Checks out `story/WI-<id>`, creates sub-branch, runs `backend-dev` |
+| `frontend` | `derive-wi`, `contract` | Checks out `story/WI-<id>`, creates sub-branch, runs `frontend-dev` |
+| `merge-and-pr` | `derive-wi`, `backend`, `frontend` | Merges sub-branches into `story/WI-<id>`, opens feature PR, updates ADO, notifies Slack |
+
+A merge conflict in `merge-and-pr` is surfaced as a pipeline error and treated as a scope violation — it should not happen if scope-enforce worked correctly.
+
+### 8.4 Stage 3 — PR review (pr-review.yml)
+
+Triggered on pull requests targeting `master` (excluding trace and design doc paths), or manually.
+
+Runs three parallel matrix jobs, one per reviewer agent:
+
+| Job | Agent | Focus |
+|---|---|---|
+| Code Review | `code-reviewer` | Correctness, patterns, maintainability |
+| Security Review | `security-auditor` | Vulnerabilities, secret handling, input validation |
+| Tech Debt Review | `tech-debt-auditor` | Duplication, coupling, complexity |
+
+Each job: resolves PR metadata, checks out at the PR head SHA, runs the Copilot agent with a prompt to `git diff origin/master...HEAD` and post findings as PR comments. Agents never approve. Severity tags: `blocker`, `major`, `minor`, `nit`.
+
+### 8.5 Stage 4 — Post-merge (post-merge.yml)
+
+Triggered on push to `master`. No AI invocation. Pure bash:
+
+1. Parses `WI-<id>` references from the merge commit message.
+2. Updates each referenced work item state to `Closed` with a link to the commit.
+3. Sends a Slack notification: `:white_check_mark: Merged to main: WI-X (abc12345)`.
+
+### 8.6 Slice schema
+
+Technical-slicing produces `slices.md` containing YAML that drives the implementation phase. Each entry:
 
 ```yaml
 slices:
   - id: S1
     title: <short imperative title>
     layer: contract | backend | frontend | infra
-    files:                           # explicit — enforced by scope hook
+    files:
       - path: <glob or exact>
         access: read-write | read-only
-    depends_on: [S0]                 # other slice IDs, must be empty for parallel start
-    parallel_with: [S2, S3]          # declared parallelism
-    acceptance:                      # Given/When/Then
+    depends_on: []          # other slice IDs; empty = can start immediately
+    parallel_with: [S2]     # declared parallelism
+    acceptance:
       - "Given ..., when ..., then ..."
     impact:
       blast_radius: low | medium | high
@@ -260,308 +725,391 @@ slices:
       integration: "<command>"
 ```
 
-### 4.4 implement-story (orchestrator)
+Infra slices (`layer: infra`) cause `implement-story` to abort and flag for human implementation.
 
-| Attribute | Value |
-|---|---|
-| Trigger | Pipeline: `/implement-story <work-item-id>` |
-| Tools | Task, Read, Write, Bash(git:*), Bash(gh:*), Bash(az:*), Bash(curl:*) |
-| Produces | Single feature PR on `story/WI-<id>`; updated ADO work items; Slack summary |
-| Rules | Never writes feature code itself; delegates to subagents; aborts on contract ambiguity |
-
-### 4.5 implement-slice (single-slice fallback)
-
-Used when a story has only one slice, or a subagent is operating on a single slice. Same output shape: a commit on a sub-branch.
-
-### 4.6 pr-review / security-review / tech-debt-review
-
-All three share a pattern:
-
-| Attribute | Value |
-|---|---|
-| Trigger | Pipeline: one subagent per skill |
-| Tools | Read, Grep, Bash(git:*), Bash(az:*) |
-| Output | PR comments only; no writes to code; no approvals |
-| Severity | blocker / major / minor / nit — enforced by the CLAUDE.md rules the skill references |
-
-## 5. Subagent contracts
-
-Every subagent definition file (`.claude/agents/<name>.md`) includes the required frontmatter:
-
-```yaml
 ---
-name: <kebab-case>
-description: <one sentence, used by Task tool for auto-delegation>
-tools: [<tight whitelist>]
-context: fork                # forks context; never shares main context
----
+
+## 9. Windows developer setup
+
+CI pipelines run on `ubuntu-latest` and require no Windows-specific configuration. The challenge is local developer use, where hooks are bash scripts.
+
+### 9.1 Option A — WSL2 (recommended)
+
+Run Claude Code entirely inside WSL2. No changes to hook scripts needed.
+
+```powershell
+# Install WSL2 (run in PowerShell as Administrator)
+wsl --install
+# Restart when prompted, then open the WSL2 terminal
 ```
 
-### 5.1 File-scope enforcement
+Inside the WSL2 terminal:
 
-The `scope-enforce.sh` hook is attached per subagent via settings. It reads the subagent name from the hook input (`transcript_path` or environment) and:
+```bash
+# Install dependencies
+sudo apt-get update && sudo apt-get install -y jq curl git
+sudo curl -sSLo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+sudo chmod +x /usr/local/bin/yq
 
-1. Loads the subagent's declared scope from a lookup table (in `.claude/agents/scope-map.json`).
-2. Parses `.tool_input.file_path` from the hook payload.
-3. Exits 0 if in scope, 2 (block) with a clear reason if out of scope.
-4. Logs every check to `.claude/trace/scope-<timestamp>.log`.
+# Install Azure CLI and devops extension
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+az extension add --name azure-devops
 
-Example `scope-map.json`:
+# Install gh CLI
+sudo apt-get install -y gh
+
+# Install Claude Code CLI
+npm install -g @anthropic-ai/claude-code
+
+# Clone repo inside WSL2 filesystem (not /mnt/c — performance matters)
+git clone git@github.com:org/repo.git ~/projects/repo
+cd ~/projects/repo
+claude
+```
+
+WSL2 accesses the Windows filesystem via `/mnt/c/...` but hooks perform significantly better when the repo lives in the Linux filesystem (`~/projects/`).
+
+### 9.2 Option B — Git Bash
+
+Use Git Bash from Git for Windows. Most hook scripts work; `yq` and `jq` need Windows binaries.
+
+```powershell
+# Install jq for Windows (scoop or winget)
+winget install jqlang.jq
+
+# Install yq for Windows
+winget install MikeFarah.yq
+
+# Install Azure CLI for Windows
+winget install Microsoft.AzureCLI
+```
+
+Configure Git Bash for Claude Code:
+
+```bash
+# In Git Bash, set env var to prevent path conversion issues
+export MSYS_NO_PATHCONV=1
+
+# Add to ~/.bashrc in Git Bash
+echo 'export MSYS_NO_PATHCONV=1' >> ~/.bashrc
+```
+
+Configure Claude Code to use Git Bash as the shell in `.claude/settings.local.json`:
 
 ```json
 {
-  "backend-dev": {
-    "read_write": ["apps/api/**", "tests/api/**"],
-    "read_only":  ["contracts/**", "shared/project/**"],
-    "denied":     ["apps/web/**", ".azure-pipelines/**", "*.env", "*.pem"]
-  },
-  "frontend-dev": {
-    "read_write": ["apps/web/**", "tests/web/**"],
-    "read_only":  ["contracts/**", "shared/project/**"],
-    "denied":     ["apps/api/**", ".azure-pipelines/**", "*.env", "*.pem"]
-  },
-  "contract-dev": {
-    "read_write": ["contracts/**"],
-    "read_only":  ["docs/designs/**", "shared/project/**"],
-    "denied":     ["apps/**", ".azure-pipelines/**", "*.env", "*.pem"]
+  "shell": "C:\\Program Files\\Git\\bin\\bash.exe"
+}
+```
+
+Known limitations with Git Bash:
+- `#!/usr/bin/env bash` shebangs work if `bash.exe` is on PATH
+- `date -u +%Y-%m-%dT%H:%M:%SZ` works in Git Bash
+- `az` and `gh` commands work if their Windows installers added them to PATH
+
+### 9.3 Option C — Native PowerShell
+
+Create PowerShell equivalents for each hook script, then point `settings.json` at the `.ps1` files.
+
+**Structure of a PowerShell hook file:**
+
+PowerShell hooks receive the tool-call payload as JSON on stdin. To allow, exit with code 0 (or simply return). To block, write a message to stderr and exit with code 2.
+
+Example `block-sensitive-files.ps1`:
+
+```powershell
+#!/usr/bin/env pwsh
+# Hook: PreToolUse on Edit|Write
+# Purpose: Block writes to secret files, pipeline configs, and master skills.
+
+$payload = $input | ConvertFrom-Json -ErrorAction SilentlyContinue
+$file = $payload.tool_input.file_path
+if (-not $file) { exit 0 }
+
+$file = $file -replace '^\.\/', ''
+
+$secretPatterns = @('*.env','*.env.*','*.pem','*.key','*.p12','*.pfx',
+                    '*secret*','*secrets*','*credentials*')
+$pipelinePatterns = @('.azure-pipelines/*','.github/workflows/*',
+                      '.gitlab-ci.yml','Jenkinsfile')
+$skillPatterns = @('shared/skills/*','.claude/skills/*',
+                   '.claude/CLAUDE.md','.claude/settings.json')
+$scopeMapPatterns = @('.claude/agents/scope-map.json','shared/agents/scope-map.json')
+
+function Test-GlobMatch {
+    param([string]$Pattern, [string]$Path)
+    $regex = '^' + [regex]::Escape($Pattern).Replace('\*\*', '.*').Replace('\*', '[^/]*') + '$'
+    return $Path -match $regex
+}
+
+$allBlocked = $secretPatterns + $pipelinePatterns + $skillPatterns + $scopeMapPatterns
+foreach ($pattern in $allBlocked) {
+    if (Test-GlobMatch -Pattern $pattern -Path $file) {
+        Write-Error "BLOCKED by block-sensitive-files: $file"
+        Write-Error "If this is intentional, a human must author the change."
+        exit 2
+    }
+}
+exit 0
+```
+
+Update `.claude/settings.json` to call the PowerShell scripts:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "pwsh .claude/hooks/block-sensitive-files.ps1" },
+          { "type": "command", "command": "pwsh .claude/hooks/scope-enforce.ps1" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "pwsh .claude/hooks/format-after-edit.ps1" }]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [{ "type": "command", "command": "pwsh .claude/hooks/trace-decisions.ps1" }]
+      }
+    ]
   }
 }
 ```
 
-### 5.2 Subagent return contract
+You must port four scripts: `block-sensitive-files.ps1`, `scope-enforce.ps1`, `format-after-edit.ps1`, and `trace-decisions.ps1`. The `normalize-input.sh` shims in `.github/hooks/` are only used by Copilot in CI and do not need Windows equivalents.
 
-Every subagent ends its run with a JSON block the orchestrator parses:
+---
 
-```json
-{
-  "subagent": "backend-dev",
-  "slices_implemented": ["S2", "S4"],
-  "branch": "story/WI-1234/backend",
-  "commit_sha": "abc123...",
-  "tests": { "unit": "passed", "integration": "passed" },
-  "files_touched": ["apps/api/..."],
-  "blockers": [],
-  "questions": []
-}
+## 10. Bootstrap deep dive
+
+`/bootstrap-project` is the one-time onboarding skill. It runs once per project adoption, must be invoked manually by a human (`disable-model-invocation: true`), and never writes `PROFILE.md` directly — only `PROFILE.draft.md`.
+
+### 10.1 The seven phases
+
+**Phase 1 — Inventory:** Glob and Grep the repo for signal files. Build an evidence list with file:line citations for every detected fact.
+
+**Phase 2 — Classify:** For each evidence item, produce a structured classification entry:
+```
+frontend.framework: react     # source: apps/web/package.json:12 (react@18.2.0)
+orchestration.pipeline_tool: github-actions  # source: .github/workflows/ directory present
+orchestration.repo_host: github              # source: git remote origin = github.com/org/repo
+```
+Ambiguous signals list both alternatives:
+```
+backend.test: xunit | nunit   # source: ambiguous — both referenced in tests/SomeTests.csproj:7-9
+                              # [NEEDS HUMAN INPUT]
 ```
 
-If `blockers` or `questions` is non-empty, orchestrator does not proceed — it opens a draft PR with these surfaced at the top.
+**Phase 3 — Recommend skills:** Produce `recommended_skills.always`, `stack_specific`, and `not_applicable` lists based on detected stack.
 
-## 6. Hooks — specifications
+**Phase 4 — Scaffold the project layer:** Create all `shared/project/` files that do not already exist. Starter templates contain section headers and `[NEEDS HUMAN INPUT]` markers — never guessed content.
 
-### 6.1 block-sensitive-files.sh (PreToolUse, all subagents + main)
+**Phase 5 — Write PROFILE.draft.md:** Write the complete PROFILE in the canonical YAML schema. Every field either has a detected value with source citation, or contains `[NEEDS HUMAN INPUT]`.
 
-Blocks: `*.env`, `*.pem`, `*.key`, `*secrets*`, `.azure-pipelines/*.yml`, `.github/workflows/*.yml`, `shared/skills/*` (master skills are read-only from the model's perspective).
+**Phase 6 — Generate project CLAUDE.md:** Reads the 10 most recently modified source files, package.json scripts, any existing CONTRIBUTING.md or ADRs, and generates `shared/project/CLAUDE.md` with real content: how to build and run, how to test, key architectural patterns, non-obvious gotchas. Uncertain observations are marked `[VERIFY]` (Claude observed it; human should confirm), not `[NEEDS HUMAN INPUT]` (no signal at all).
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-payload=$(cat)
-file=$(echo "$payload" | jq -r '.tool_input.file_path // empty')
-[[ -z "$file" ]] && exit 0
-case "$file" in
-  *.env|*.pem|*.key|*secrets*|*secret.*|*.p12|*.pfx)
-    echo "BLOCKED: $file is a secret file." >&2; exit 2 ;;
-  */.azure-pipelines/*|*/.github/workflows/*)
-    echo "BLOCKED: $file is pipeline config. Infra edits require human author." >&2; exit 2 ;;
-  */shared/skills/*)
-    echo "BLOCKED: $file is a master skill. Customize via shared/project/ instead." >&2; exit 2 ;;
-esac
-exit 0
-```
+**Phase 7 — Handoff:** Prints a structured summary listing the draft file location, what was scaffolded vs skipped, detected stacks, orchestration fields needing human input, and the four next steps (review draft, fill guidelines, rename to PROFILE.md, commit).
 
-### 6.2 scope-enforce.sh (PreToolUse, subagent-scoped)
+### 10.2 What bootstrap auto-detects vs. requires human input
 
-See 5.1. Uses `jq` + glob matching (bash `extglob` or `find` fallback).
-
-### 6.3 format-after-edit.sh (PostToolUse on Edit|Write)
-
-Runs project-configured formatter. Reads `shared/project/PROFILE.md` for the command (e.g. `pnpm prettier --write`, `dotnet format`). Silent on success; logs on failure; never fails the overall turn.
-
-### 6.4 trace-decisions.sh (PostToolUse, every tool)
-
-Appends one JSON line per tool call to `.claude/trace/<run-id>.jsonl`. Pipeline archives the file as build artifact.
-
-## 7. Scripts — CLI wrappers
-
-Every script is idempotent where possible, exits non-zero on failure, and logs to stderr.
-
-### 7.1 ado-wi-show.sh
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-az boards work-item show --id "$1" --output json
-```
-
-### 7.2 ado-wi-create-slice.sh
-
-```bash
-#!/usr/bin/env bash
-# usage: ado-wi-create-slice.sh <parent-id> <slice-yaml-file>
-set -euo pipefail
-parent="$1"; yaml="$2"
-title=$(yq -r '.title' "$yaml")
-body=$(cat "$yaml")
-az boards work-item create \
-  --type "Task" \
-  --title "$title" \
-  --description "$body" \
-  --fields "System.Parent=$parent" \
-  --output json
-```
-
-### 7.3 ado-pr-comment.sh
-
-```bash
-#!/usr/bin/env bash
-# usage: ado-pr-comment.sh <pr-id> <thread-status> <comment-file>
-set -euo pipefail
-pr="$1"; status="$2"; body_file="$3"
-az repos pr thread create \
-  --pull-request-id "$pr" \
-  --comments "$(cat "$body_file")" \
-  --status "$status" \
-  --output json
-```
-
-### 7.4 slack-notify.sh
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-: "${SLACK_WEBHOOK_URL:?}"
-msg="$*"
-curl -sS -X POST -H 'Content-type: application/json' \
-  --data "$(jq -n --arg t "$msg" '{text:$t}')" \
-  "$SLACK_WEBHOOK_URL" >/dev/null
-```
-
-### 7.5 check-tech-agnostic.sh
-
-Grep blocklist against a file. Non-zero exit on any hit.
-
-## 8. Pipelines — specifications
-
-### 8.1 design-gen.yml
-
-- Trigger: webhook from ADO Service Hook on `WorkItemUpdated` where `tags` contains `ai:ready`.
-- Inputs: `workItemId` (from webhook payload).
-- Steps: checkout → `az login` → `ClaudeCodeBaseTask@1` with `/requirements-analysis <id>` → archive trace.
-- Token budget: `--max-turns 30`.
-- Model: Opus (design quality matters most here).
-
-### 8.2 implement-story.yml
-
-- Trigger: webhook on PR merged where source branch matches `design/WI-*`.
-- Inputs: `workItemId` (parsed from branch name).
-- Steps: checkout → `az login` → ClaudeCodeBaseTask with `/implement-story <id>`.
-- Token budget: `--max-turns 120`.
-- Model: Sonnet (bulk of work is mechanical implementation; orchestrator's decisions are short).
-- Timeout: 90 minutes.
-
-### 8.3 pr-review.yml
-
-- Trigger: PR opened or updated on `main`.
-- Strategy: matrix, 3 parallel jobs (code, security, debt).
-- Steps: checkout → `az login` → ClaudeCodeBaseTask invoking the three subagents.
-- Token budget: `--max-turns 40` per reviewer.
-- Model: Sonnet (review); Haiku for tech-debt review if cost pressure is high.
-
-### 8.4 post-merge.yml
-
-- Trigger: PR merged to `main`.
-- Steps: `az boards work-item update --id <id> --state Closed`; `slack-notify.sh "Merged WI-<id>"`.
-- No Claude invocation. Pure bash.
-
-## 9. Permissions model
-
-| Actor | Scope | Secret |
+| Field | Auto-detected | Requires human input |
 |---|---|---|
-| ADO PAT (`ADO_PAT`) | Work items RW, code RW, build RW, PR RW | Pipeline library, not in repo |
-| Anthropic API key (`ANTHROPIC_API_KEY`) | Claude inference | Pipeline library |
-| Slack webhook (`SLACK_WEBHOOK_URL`) | Post to one channel | Pipeline library |
-| Service connection `ado-service-hook` | Webhook ingress | ADO project admin |
-| Branch policy on `main` | Require 1 human approval, require PR build to pass | ADO project admin |
-| Branch policy on `design/**` | Require 1 human approval | ADO project admin |
+| `project.name` | From `package.json` name or git remote | If neither is usable |
+| `project.type` | From detected stack combination | If ambiguous |
+| `orchestration.pipeline_tool` | From `.github/workflows/` or `.azure-pipelines/` presence | If both present or neither |
+| `orchestration.repo_host` | From `git remote get-url origin` URL | If URL is unrecognized |
+| `orchestration.work_items.org_url` | From `az devops configure` if configured | Always verify |
+| `orchestration.work_items.project` | Cannot be auto-detected | Always |
+| `orchestration.notifications.type` | Cannot be auto-detected | Always |
+| `orchestration.notifications.webhook_url` | Cannot be auto-detected | Always |
+| `stacks.*` | Framework files, config files | When ambiguous |
+| `gates.*` | From `package.json` scripts, Makefile | When not in manifest |
 
-Claude running in the pipeline executes with **only** the PAT's permissions. It cannot `git push --force`, cannot delete branches (disabled by branch policy), cannot edit pipelines (blocked by hook).
+### 10.3 Evidence-citation format
 
-## 10. Observability
+Every field in the draft carries a `# source:` comment in the form `<file>:<line> (<evidence>)`. Fabricated facts are prohibited — if bootstrap cannot cite evidence, the field value is literally `[NEEDS HUMAN INPUT]`. This makes the review step straightforward: a human reads the draft, checks the cited files, and either confirms or corrects each value.
+
+---
+
+## 11. Adding a new skill
+
+To add a new skill to the system (e.g., `performance-review`):
+
+**Step 1 — Create the skill file:**
+
+```bash
+mkdir -p shared/skills/performance-review
+# Write the skill procedure in shared/skills/performance-review/SKILL.md
+```
+
+The SKILL.md must include the frontmatter block, the load-order preamble (PROFILE → CLAUDE.md → overrides → guidelines → stacks), and the skill procedure. Follow the existing skills as templates.
+
+**Step 2 — Add to block-sensitive-files.sh protection:**
+
+Both `.claude/hooks/block-sensitive-files.sh` and `.github/hooks/block-sensitive-files.sh` contain a pattern for `shared/skills/*`. New skills in `shared/skills/` are automatically protected — no change needed.
+
+**Step 3 — No wrapper files needed:**
+
+Both tools discover skills directly from `shared/skills/<name>/SKILL.md`. There are no wrapper files in `.claude/skills/` or `.github/instructions/` for skills. If you want the skill to appear in skill listings, the discovery is via the shared path.
+
+**Step 4 — Add a subagent if the skill needs one:**
+
+If the new skill spawns a subagent (as `pr-review` spawns `code-reviewer`):
+
+1. Write the full agent definition in `shared/agents/<name>.md`
+2. Add the Claude Code thin wrapper in `.claude/agents/<name>.md` (frontmatter + `See shared/agents/<name>.md`)
+3. Add the Copilot thin wrapper in `.github/agents/<name>.agent.md` (Copilot frontmatter + same reference)
+4. Add the agent's scope to `shared/agents/scope-map.json`, `.claude/agents/scope-map.json`, and `.github/agents/scope-map.json`
+
+**Step 5 — Add to a workflow if pipeline-invoked:**
+
+Add a new job to the relevant GitHub Actions workflow (`.github/workflows/`) or Azure Pipelines file (`.azure-pipelines/`). These files are protected — only humans may edit them.
+
+---
+
+## 12. Extending notifications or repo integrations
+
+### 12.1 Adding a new notification type
+
+Edit `shared/scripts/notify.sh`. Add a new `case` branch for the new type name:
+
+```bash
+case "$notif_type" in
+  slack)   # ... existing ...  ;;
+  teams)   # ... existing ...  ;;
+  webhook) # ... existing ...  ;;
+  pagerduty)
+    # Example: PagerDuty Events API v2
+    payload=$(jq -n --arg t "$msg" '{routing_key: $ROUTING_KEY, event_action: "trigger",
+      payload: {summary: $t, severity: "info", source: "ai-sdlc"}}')
+    curl -sS -X POST -H 'Content-Type: application/json' \
+      --data "$payload" "https://events.pagerduty.com/v2/enqueue" >/dev/null
+    echo "PagerDuty notification sent."
+    ;;
+esac
+```
+
+Update the PROFILE.md `orchestration.notifications.type` enum documentation in `shared/project/PROFILE.draft.md` to include the new option, so bootstrap reflects it.
+
+### 12.2 Adding a new repo host
+
+Edit `shared/scripts/create-pr.sh`. Add a new `case` branch:
+
+```bash
+case "$repo_host" in
+  github)       # ... existing ... ;;
+  azure-repos)  # ... existing ... ;;
+  gitlab)
+    glab mr create \
+      --title "$title" \
+      --description "$body_text" \
+      --source-branch "$branch" \
+      --target-branch "$base"
+    ;;
+esac
+```
+
+Also update the `PROFILE.draft.md` template so bootstrap can detect and set the new value, and update the detection logic in `shared/skills/bootstrap-project/SKILL.md` (Phase 1, repo host detection) to recognize the new remote URL pattern.
+
+---
+
+## 13. Permissions model
+
+| Actor | Scope | Secret location |
+|---|---|---|
+| ADO PAT (`ADO_PAT`) | Work items RW, code RW, build RW, PR RW | GitHub Actions secret / Azure Pipelines library |
+| GitHub token (`GH_TOKEN` / `COPILOT_TOKEN`) | Repo contents write, PR write | GitHub Actions secret |
+| Anthropic API key (via Copilot) | Claude inference | GitHub Actions secret |
+| Slack webhook (`SLACK_WEBHOOK_URL`) | Post to one channel | GitHub Actions secret / Pipeline library |
+| `GITHUB_TOKEN` | PR read, PR write comments | Auto-injected by Actions runner |
+
+Claude/Copilot running in CI executes with only the granted token's permissions. Branch policies on `master` require at least one human approval — Claude cannot merge. The `block-sensitive-files` hook prevents writing pipeline YAML even if an adversarial prompt tries to do so.
+
+---
+
+## 14. Observability
 
 | Signal | Where it goes | Retention |
 |---|---|---|
-| `stream-json` traces | Pipeline artifact `claude-trace` | 90 days |
-| Hook block events | `.claude/trace/blocks-<date>.log` committed by post-merge only if non-empty | Forever (git) |
-| Subagent return JSON | Pipeline log + attached to PR description | PR lifetime |
+| Copilot/Claude stdout + stderr | Pipeline log and `copilot-output.log` artifact | 90 days |
+| Hook trace (`trace-decisions.sh`) | `.github/trace/<run-id>.jsonl` uploaded as artifact | 90 days |
+| Scope block events | `.claude/trace/scope-blocks.jsonl` | Local / per run |
+| Formatter failures | `.claude/trace/format-failures.jsonl` | Local / per run |
+| Subagent return JSON | Embedded in feature PR description | PR lifetime |
 | Slack thread | Slack channel | Per Slack retention |
 | ADO work item comments | ADO | Forever |
 
-Dashboards are phase 2. For v1, `jq` over archived traces is enough.
+Querying traces locally:
 
-## 11. Cost model (rough)
+```bash
+# All blocked tool calls across a run
+jq 'select(.tool=="Edit" or .tool=="Write") | select(.status=="false")' \
+  .claude/trace/<run-id>.jsonl
 
-Based on Apr 2026 Anthropic pricing for a medium story:
+# All scope violations
+jq '.' .claude/trace/scope-blocks.jsonl
+```
 
-| Stage | Model | Tokens (rough) | Cost estimate |
-|---|---|---|---|
-| Design gen (stages 1-3) | Opus | ~80k in + 30k out | ~$3 |
-| Impl — contract-dev | Sonnet | ~20k in + 10k out | ~$0.20 |
-| Impl — backend-dev | Sonnet | ~120k in + 40k out | ~$1.50 |
-| Impl — frontend-dev | Sonnet | ~120k in + 40k out | ~$1.50 |
-| PR review x3 | Sonnet | ~60k in + 10k out each | ~$2.40 |
-| **Total per story** | | | **~$8–10** |
+---
 
-Double this for complex stories. Halve it for simple ones. At 50 stories/week the bill is $2k/month ± 50%.
+## 15. Cost model (rough)
 
-## 12. Security considerations
+Based on May 2026 Anthropic pricing via GitHub Copilot (claude-sonnet-4-6):
 
-- **Prompt injection surface:** work item descriptions, PR descriptions, file contents. The `critical_injection_defense` already baked into Claude Code's behaviour is the first line. The hook layer is the second: block-sensitive-files prevents exfiltration via file read, scope-enforce prevents lateral movement.
-- **Secret handling:** all secrets live in pipeline variable groups, injected as env vars. Never written to files. Never echoed to logs (pipeline masks).
-- **PAT scope minimization:** the PAT is limited to one ADO project. Rotate quarterly.
-- **Merge discipline:** branch policies on `main` and `design/**` require human approval. Claude cannot merge.
-- **Audit:** every tool call is logged. Every blocked call is preserved.
-- **Data residency:** if using Microsoft Foundry instead of public Anthropic API, configure the `ClaudeCodeBaseTask` to point at the Foundry endpoint. Trace data stays in your Azure tenant.
+| Stage | Tokens (rough) | Cost estimate |
+|---|---|---|
+| Design gen (`/requirements-analysis`) | ~80k in + 30k out | ~$2.50 |
+| Contract-dev | ~20k in + 10k out | ~$0.20 |
+| Backend-dev | ~120k in + 40k out | ~$1.50 |
+| Frontend-dev | ~120k in + 40k out | ~$1.50 |
+| PR review × 3 reviewers | ~60k in + 10k out each | ~$2.40 |
+| **Total per typical story** | | **~$8** |
 
-## 13. Extension model
+Double for complex stories, halve for simple ones. At 50 stories/week the bill is approximately $2k/month ± 50%. Use `--max-turns` caps in workflow files to bound worst-case spend.
 
-Adding a new stack (e.g. Python backend):
+---
 
-1. Add detection rules to `bootstrap-project/SKILL.md`.
-2. Add `stacks/python.md` as a scaffold (can be empty at first).
-3. Add a new subagent `python-backend-dev.md` if the stack deserves its own scope.
-4. Update `scope-map.json`.
+## 16. Security considerations
 
-Adding a new review dimension (e.g. performance review):
+**Prompt injection surface:** Work item descriptions, PR descriptions, and file contents all flow into the model context. The hook layer is the primary defence: `block-sensitive-files` prevents exfiltration via file write, `scope-enforce` prevents lateral movement between layers.
 
-1. New master skill `shared/skills/performance-review/SKILL.md`.
-2. New subagent `.claude/agents/performance-auditor.md`.
-3. Add to `pr-review.yml` matrix.
+**Secret handling:** All secrets live in pipeline variable groups or GitHub Actions secrets, injected as environment variables. They are never written to files, never echoed in script output (pipelines mask values matching secret patterns).
 
-Adding a new CI (e.g. GitHub Actions):
+**PAT scope minimisation:** The ADO PAT is limited to one ADO project. Rotate quarterly. The Copilot token (`GH_TOKEN`) is scoped to `contents: write` and `pull-requests: write` only — it cannot modify Actions workflows.
 
-1. Copy `.azure-pipelines/*.yml` shape into `.github/workflows/`.
-2. Replace `az` calls with `gh` where applicable (most calls become `gh api` or `gh pr create`).
-3. Everything else is identical — Claude Code is CI-agnostic.
+**Merge discipline:** Branch policies on `master` require human approval. Claude/Copilot can only open PRs and post comments. It cannot approve or merge.
 
-## 14. Risks and mitigations
+**Master skill protection:** The `block-sensitive-files` hook blocks writes to `shared/skills/**`. Project customisation goes in `shared/project/` — never in `shared/skills/`.
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| ADO MCP/CLI version drift | Medium | Breaks automation | Pin `az devops` extension version in pipeline |
-| Claude-generated tests are vacuous | Medium | Merged code without real coverage | Mutation testing on a random sample of merged PRs; CLAUDE.md rule against single-assertion tests |
-| Subagent crosses file boundary | Low | Merge conflict, wrong attribution | scope-enforce.sh hook; merge conflict triggers human review |
-| Prompt injection from work item | Low | Data leak attempt | Critical injection defense + file-block hook |
-| Token cost overrun | Medium | Budget surprise | `--max-turns` caps + pipeline-level cost alert |
-| Master skills upgrade breaks project layer | Medium | Regression | Versioned master skill pack; per-project pin; changelog + release notes |
-| Too many reviewer comments | High | Review fatigue | Severity threshold; noise reduction via "only blocker/major appear inline; minor/nit go in a summary comment" |
+**Audit:** Every tool call is logged by `trace-decisions.sh`. Every blocked call is logged separately in `scope-blocks.jsonl`. Trace artifacts are retained for 90 days.
 
-## 15. Definition of done for v1
+**Data residency:** If using a hosted Anthropic endpoint (e.g. via Azure AI Foundry), configure the Copilot CLI to point at that endpoint. Trace data stays within the CI runner's retention boundary.
 
-- `/bootstrap-project` runs cleanly on three distinct repos (React/.NET, Angular/Node, Python-only).
-- A tagged work item produces a design PR with tech-agnostic functional doc, non-empty technical doc, and at least two well-formed slices within 10 minutes.
-- A merged design PR produces a feature PR on `story/WI-<id>` with passing unit + integration tests.
-- The feature PR has three review subagent comments within 5 minutes of opening.
-- Zero auto-merges. Zero writes to blocked paths.
-- Full trace archive exists per pipeline run.
-- Pilot team reports tag-to-merge under two hours for three consecutive typical stories.
+---
+
+## 17. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| All skills abort with `"Run /bootstrap-project first."` | `shared/project/PROFILE.md` does not exist | Run `/bootstrap-project`, complete the checklist, rename `PROFILE.draft.md` → `PROFILE.md` |
+| Hook not running (Claude Code, macOS/Linux) | Script not executable | `chmod +x .claude/hooks/*.sh` |
+| Hook not running (Claude Code, Windows Git Bash) | Hook path uses forward slashes but Git Bash expects native paths | Set `MSYS_NO_PATHCONV=1` in Git Bash; verify hook command in `settings.json` uses forward slashes |
+| Hook not running (Claude Code, Windows native) | `.sh` scripts cannot run natively | Use WSL2 (Option A), Git Bash (Option B), or port to PowerShell `.ps1` (Option C) |
+| Hook not running (Copilot) | `hooks.json` not registered or `bash` path incorrect | Verify `.github/hooks/hooks.json` path; confirm Copilot version supports hook config; check `chmod +x .github/hooks/*.sh` runs in CI setup step |
+| `PROFILE.md not found; defaulting to github repo_host.` in notify.sh | Scripts called before `PROFILE.md` is activated | Rename `PROFILE.draft.md` → `PROFILE.md` after bootstrap review |
+| `Unknown notification type: <x>` from notify.sh | `orchestration.notifications.type` contains an unsupported value | Set to `slack`, `teams`, or `webhook` in PROFILE.md |
+| `Unknown repo_host: <x>` from create-pr.sh | `orchestration.repo_host` contains an unsupported value | Set to `github` or `azure-repos` in PROFILE.md |
+| Scope block: `"Subagent 'backend-dev' has no declared scope covering apps/web/..."` | backend-dev attempted to write a frontend file — usually a prompt misunderstanding | Review subagent prompt. The subagent must return a blocker in JSON summary, not edit out of scope |
+| Merge conflict in `merge-and-pr` job | Scope violation — backend and frontend sub-branches touched the same file | Investigate which shared file was written by both subagents. Fix the slices.md file-scope declarations or the subagent prompts. The conflict should not occur if scope was respected |
+| Feature PR opened as draft unexpectedly | `verify-story` returned `ISSUES_FOUND` or `BLOCKED` | Read `docs/designs/WI-<id>/verification.md` for specific AC failures |
+| Browser verification skipped | Chrome MCP not connected, or all slices are `layer: backend` only, or `skip_browser_verification: true` | Check the trace for the skip reason; connect Chrome MCP for local runs |
+| ADO work item state not updated after merge | `post-merge.yml` could not parse `WI-<id>` from commit message | Ensure merge commit message contains `WI-<id>`; verify `ADO_PAT` secret is set and has work item write permission |
+| Notification not sent after design PR | `notify.sh` silently skipped (PROFILE.md not found or notification not configured) | Verify PROFILE.md exists and `orchestration.notifications.*` fields are filled in without `[NEEDS HUMAN INPUT]` |
+| `yq: command not found` in CI | yq install step failed or was skipped | Verify the `Install tooling` step in the workflow ran successfully; yq binary path is `/usr/local/bin/yq` |
+| `az devops login` fails | `ADO_PAT` secret not set or expired | Verify the secret in GitHub Actions settings; rotate the PAT if expired |
+| Copilot workflow step exits 0 but no skill output produced | Copilot invocation received but skill aborted due to missing PROFILE.md or malformed input | Check `copilot-output.log` artifact; confirm `shared/project/PROFILE.md` is committed to the repo |
